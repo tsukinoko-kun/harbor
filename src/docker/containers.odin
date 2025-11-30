@@ -27,6 +27,24 @@ send_docker_request :: proc(path: string) -> (response: string, ok: bool) {
 	return send_http_request(request)
 }
 
+send_docker_post_request :: proc(path: string) -> (response: string, ok: bool) {
+	full_path := strings.concatenate({"/", DOCKER_API_VERSION, path})
+	request := build_http_request("POST", full_path)
+	return send_http_request(request)
+}
+
+start_container :: proc(container_id: string) -> bool {
+	path := strings.concatenate({"/containers/", container_id, "/start"})
+	_, ok := send_docker_post_request(path)
+	return ok
+}
+
+stop_container :: proc(container_id: string) -> bool {
+	path := strings.concatenate({"/containers/", container_id, "/stop"})
+	_, ok := send_docker_post_request(path)
+	return ok
+}
+
 send_http_request :: proc(request: string) -> (response: string, ok: bool) {
 	// Try with existing connection, retry once if connection is broken
 	for attempt in 0..<2 {

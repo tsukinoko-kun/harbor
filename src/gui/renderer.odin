@@ -56,6 +56,12 @@ ICON_X :: #load("../../assets/icons/x.png", []u8)
 @(private)
 ICON_TERMINAL :: #load("../../assets/icons/terminal.png", []u8)
 
+@(private)
+ICON_PLAY :: #load("../../assets/icons/play.png", []u8)
+
+@(private)
+ICON_STOP :: #load("../../assets/icons/stop.png", []u8)
+
 // Icon textures struct
 Icons :: struct {
 	chevron_down:  rl.Texture2D,
@@ -63,6 +69,8 @@ Icons :: struct {
 	paragraph:     rl.Texture2D,
 	x:             rl.Texture2D,
 	terminal:      rl.Texture2D,
+	play:          rl.Texture2D,
+	stop:          rl.Texture2D,
 }
 
 @(private)
@@ -202,6 +210,8 @@ init :: proc() {
 	icons.paragraph = load_icon(ICON_PARAGRAPH)
 	icons.x = load_icon(ICON_X)
 	icons.terminal = load_icon(ICON_TERMINAL)
+	icons.play = load_icon(ICON_PLAY)
+	icons.stop = load_icon(ICON_STOP)
 }
 
 shutdown :: proc() {
@@ -214,6 +224,8 @@ shutdown :: proc() {
 	rl.UnloadTexture(icons.paragraph)
 	rl.UnloadTexture(icons.x)
 	rl.UnloadTexture(icons.terminal)
+	rl.UnloadTexture(icons.play)
+	rl.UnloadTexture(icons.stop)
 	
 	for rf in raylib_fonts {
 		rl.UnloadFont(rf.font)
@@ -346,9 +358,10 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 	action_container_id := clay.GetElementIdWithIndex(clay.MakeString("CardActions"), index)
 	logs_btn_id := clay.GetElementIdWithIndex(clay.MakeString("LogsBtn"), index)
 	terminal_btn_id := clay.GetElementIdWithIndex(clay.MakeString("TerminalBtn"), index)
+	startstop_btn_id := clay.GetElementIdWithIndex(clay.MakeString("StartStopBtn"), index)
 
 	// Check hover state - include floating action elements to prevent flickering
-	card_hovered := clay.PointerOver(element_id) || clay.PointerOver(action_container_id) || clay.PointerOver(logs_btn_id) || clay.PointerOver(terminal_btn_id)
+	card_hovered := clay.PointerOver(element_id) || clay.PointerOver(action_container_id) || clay.PointerOver(logs_btn_id) || clay.PointerOver(terminal_btn_id) || clay.PointerOver(startstop_btn_id)
 	card_color := COLOR_CARD
 	if card_hovered {
 		card_color = COLOR_CARD_HOVER
@@ -406,21 +419,62 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 
 		// Floating action buttons (only visible on hover)
 		if card_hovered {
-			if clay.UI(action_container_id)(
+		if clay.UI(action_container_id)(
+			{
+				layout = {
+					sizing = {clay.SizingFit({}), clay.SizingFit({})},
+					padding = {8, 16, 0, 0},
+					childGap = 4,
+					childAlignment = {y = .Center},
+				},
+				floating = {
+					attachTo = .Parent,
+					attachment = {element = .RightCenter, parent = .RightCenter},
+				},
+			},
+		) {
+			// Start/Stop button
+			is_running := container.State == "running"
+			startstop_btn_color := is_running ? COLOR_STATUS_STOPPED : COLOR_STATUS_RUNNING
+			if clay.PointerOver(startstop_btn_id) {
+				startstop_btn_color = is_running ? clay.Color{255, 100, 100, 255} : clay.Color{100, 200, 100, 255}
+
+				// Handle click
+				if rl.IsMouseButtonPressed(.LEFT) {
+					if is_running {
+						docker.stop_container(container.Id)
+					} else {
+						docker.start_container(container.Id)
+					}
+				}
+			}
+
+			if clay.UI(startstop_btn_id)(
 				{
 					layout = {
-						sizing = {clay.SizingFit({}), clay.SizingFit({})},
-						padding = {8, 16, 0, 0},
-						childGap = 4,
-						childAlignment = {y = .Center},
+						sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
+						padding = {6, 6, 6, 6},
+						childAlignment = {x = .Center, y = .Center},
 					},
-					floating = {
-						attachTo = .Parent,
-						attachment = {element = .RightCenter, parent = .RightCenter},
-					},
+					backgroundColor = startstop_btn_color,
+					cornerRadius = clay.CornerRadiusAll(4),
 				},
 			) {
-				// Logs button
+				// Play or Stop icon
+				icon_texture := is_running ? &icons.stop : &icons.play
+				if clay.UI()(
+					{
+						layout = {
+							sizing = {clay.SizingFixed(16), clay.SizingFixed(16)},
+						},
+						image = {
+							imageData = icon_texture,
+						},
+					},
+				) {}
+			}
+
+			// Logs button
 				logs_btn_color := COLOR_BUTTON
 				if clay.PointerOver(logs_btn_id) {
 					logs_btn_color = COLOR_BUTTON_HOVER
@@ -535,6 +589,19 @@ get_container_project :: proc(container: docker.ContainerSummary) -> string {
 render_project_group :: proc(project: string, containers: []docker.ContainerSummary, container_index: ^u32) {
 	is_collapsed := collapsed_projects[project] or_else false
 	
+	// Determine if project is running (any container running)
+	project_is_running := false
+	for container in containers {
+		if container.State == "running" {
+			project_is_running = true
+			break
+		}
+	}
+	
+	// Pre-compute element IDs
+	header_id := clay.GetElementId(clay.MakeString(project))
+	project_startstop_id := clay.GetElementId(clay.MakeString(strings.concatenate({project, "_startstop"}, context.temp_allocator)))
+	
 	// Project group container
 	if clay.UI()(
 		{
@@ -546,14 +613,13 @@ render_project_group :: proc(project: string, containers: []docker.ContainerSumm
 		},
 	) {
 		// Clickable header
-		header_id := clay.GetElementId(clay.MakeString(project))
 		header_color := COLOR_HEADER
-		if clay.PointerOver(header_id) {
+		if clay.PointerOver(header_id) || clay.PointerOver(project_startstop_id) {
 			header_color = COLOR_CARD_HOVER
 		}
 
-		// Handle click to toggle collapse
-		if clay.PointerOver(header_id) && rl.IsMouseButtonPressed(.LEFT) {
+		// Handle click to toggle collapse - but not if clicking the start/stop button
+		if clay.PointerOver(header_id) && !clay.PointerOver(project_startstop_id) && rl.IsMouseButtonPressed(.LEFT) {
 			collapsed_projects[project] = !is_collapsed
 			is_collapsed = !is_collapsed
 		}
@@ -598,6 +664,53 @@ render_project_group :: proc(project: string, containers: []docker.ContainerSumm
 					{textColor = COLOR_TEXT_SECONDARY, fontId = FONT_ID_BODY, fontSize = FONT_SIZE_BODY - 2},
 				),
 			)
+			
+			// Floating start/stop button for project
+			project_btn_color := project_is_running ? COLOR_STATUS_STOPPED : COLOR_STATUS_RUNNING
+			if clay.PointerOver(project_startstop_id) {
+				project_btn_color = project_is_running ? clay.Color{255, 100, 100, 255} : clay.Color{100, 200, 100, 255}
+				
+				// Handle click - start or stop all containers in project
+				if rl.IsMouseButtonPressed(.LEFT) {
+					for container in containers {
+						if project_is_running {
+							docker.stop_container(container.Id)
+						} else {
+							docker.start_container(container.Id)
+						}
+					}
+				}
+			}
+			
+			if clay.UI(project_startstop_id)(
+				{
+					layout = {
+						sizing = {clay.SizingFixed(24), clay.SizingFixed(24)},
+						padding = {4, 4, 4, 4},
+						childAlignment = {x = .Center, y = .Center},
+					},
+					backgroundColor = project_btn_color,
+					cornerRadius = clay.CornerRadiusAll(4),
+					floating = {
+						attachTo = .Parent,
+						attachment = {element = .RightCenter, parent = .RightCenter},
+						offset = {-8, 0},
+					},
+				},
+			) {
+				// Play or Stop icon
+				project_icon := project_is_running ? &icons.stop : &icons.play
+				if clay.UI()(
+					{
+						layout = {
+							sizing = {clay.SizingFixed(14), clay.SizingFixed(14)},
+						},
+						image = {
+							imageData = project_icon,
+						},
+					},
+				) {}
+			}
 		}
 
 		// Render containers if not collapsed
