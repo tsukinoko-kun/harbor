@@ -52,4 +52,3 @@ close_socket_connection :: proc(sock: Socket) {
 remove_socket_timeout :: proc(sock: Socket) -> bool {
 	return true
 }
-

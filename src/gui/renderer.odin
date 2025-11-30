@@ -31,7 +31,7 @@ COLOR_BUTTON :: clay.Color{70, 130, 180, 255}
 COLOR_BUTTON_HOVER :: clay.Color{90, 150, 200, 255}
 COLOR_OVERLAY :: clay.Color{0, 0, 0, 180}
 COLOR_LOG_BACKGROUND :: clay.Color{25, 25, 25, 255}
-COLOR_SELECTION :: clay.Color{70, 130, 180, 128}  // Semi-transparent blue for selection
+COLOR_SELECTION :: clay.Color{70, 130, 180, 128} // Semi-transparent blue for selection
 
 // Embedded font data
 @(private)
@@ -96,7 +96,7 @@ collapsed_projects: map[string]bool
 
 // Log text selection state
 @(private)
-log_selection_start: int = -1  // -1 means no selection
+log_selection_start: int = -1 // -1 means no selection
 
 @(private)
 log_selection_end: int = -1
@@ -178,14 +178,7 @@ init :: proc() {
 	)
 
 	// Load body font from embedded data
-	font := rl.LoadFontFromMemory(
-		".ttf",
-		raw_data(FONT_DATA),
-		i32(len(FONT_DATA)),
-		32,
-		nil,
-		0,
-	)
+	font := rl.LoadFontFromMemory(".ttf", raw_data(FONT_DATA), i32(len(FONT_DATA)), 32, nil, 0)
 	rl.SetTextureFilter(font.texture, .BILINEAR)
 	append(&raylib_fonts, Raylib_Font{fontId = FONT_ID_BODY, font = font})
 
@@ -217,7 +210,7 @@ init :: proc() {
 shutdown :: proc() {
 	// Stop any active log stream
 	docker.stop_log_stream()
-	
+
 	// Unload icons
 	rl.UnloadTexture(icons.chevron_down)
 	rl.UnloadTexture(icons.chevron_right)
@@ -226,7 +219,7 @@ shutdown :: proc() {
 	rl.UnloadTexture(icons.terminal)
 	rl.UnloadTexture(icons.play)
 	rl.UnloadTexture(icons.stop)
-	
+
 	for rf in raylib_fonts {
 		rl.UnloadFont(rf.font)
 	}
@@ -245,13 +238,17 @@ update :: proc() {
 
 	// Update scroll - disable drag scrolling when log overlay is active to allow text selection
 	scroll_delta := rl.GetMouseWheelMoveV()
-	enable_drag := !docker.is_log_stream_active()  // Disable drag when log overlay is shown
-	clay.UpdateScrollContainers(enable_drag, {scroll_delta.x, scroll_delta.y * 10}, rl.GetFrameTime())
+	enable_drag := !docker.is_log_stream_active() // Disable drag when log overlay is shown
+	clay.UpdateScrollContainers(
+		enable_drag,
+		{scroll_delta.x, scroll_delta.y * 10},
+		rl.GetFrameTime(),
+	)
 }
 
 render :: proc(containers: []docker.ContainerSummary) {
 	update()
-	
+
 	// Handle log overlay close on Escape
 	if docker.is_log_stream_active() && rl.IsKeyPressed(.ESCAPE) {
 		docker.stop_log_stream()
@@ -279,25 +276,25 @@ render :: proc(containers: []docker.ContainerSummary) {
 
 	// Main container
 	if clay.UI()(
-		{
-			layout = {
-				sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
-				layoutDirection = .TopToBottom,
-			},
-			backgroundColor = COLOR_BACKGROUND,
+	{
+		layout = {
+			sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
+			layoutDirection = .TopToBottom,
 		},
+		backgroundColor = COLOR_BACKGROUND,
+	},
 	) {
 		// Content area with scroll
 		if clay.UI(clay.GetElementId(clay.MakeString("ScrollContainer")))(
-			{
-				layout = {
-					sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
-					padding = {16, 16, 16, 16},
-					childGap = 8,
-					layoutDirection = .TopToBottom,
-				},
-				clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+		{
+			layout = {
+				sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
+				padding = {16, 16, 16, 16},
+				childGap = 8,
+				layoutDirection = .TopToBottom,
 			},
+			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+		},
 		) {
 			container_index: u32 = 0
 
@@ -326,7 +323,7 @@ render :: proc(containers: []docker.ContainerSummary) {
 				)
 			}
 		}
-		
+
 		// Render log overlay if active
 		if docker.is_log_stream_active() {
 			render_log_overlay()
@@ -338,12 +335,12 @@ render :: proc(containers: []docker.ContainerSummary) {
 	rl.BeginDrawing()
 	rl.ClearBackground(clay_color_to_rl_color(COLOR_BACKGROUND))
 	clay_raylib_render(&render_commands)
-	
+
 	// Draw selection rectangles on top of Clay rendering (if log overlay is active)
 	if docker.is_log_stream_active() {
 		draw_log_selection()
 	}
-	
+
 	rl.EndDrawing()
 }
 
@@ -361,23 +358,28 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 	startstop_btn_id := clay.GetElementIdWithIndex(clay.MakeString("StartStopBtn"), index)
 
 	// Check hover state - include floating action elements to prevent flickering
-	card_hovered := clay.PointerOver(element_id) || clay.PointerOver(action_container_id) || clay.PointerOver(logs_btn_id) || clay.PointerOver(terminal_btn_id) || clay.PointerOver(startstop_btn_id)
+	card_hovered :=
+		clay.PointerOver(element_id) ||
+		clay.PointerOver(action_container_id) ||
+		clay.PointerOver(logs_btn_id) ||
+		clay.PointerOver(terminal_btn_id) ||
+		clay.PointerOver(startstop_btn_id)
 	card_color := COLOR_CARD
 	if card_hovered {
 		card_color = COLOR_CARD_HOVER
 	}
 
 	if clay.UI(element_id)(
-		{
-			layout = {
-				sizing = {clay.SizingGrow({}), clay.SizingFit({})},
-				padding = {16, 16, 12, 12},
-				childGap = 8,
-				layoutDirection = .TopToBottom,
-			},
-			backgroundColor = card_color,
-			cornerRadius = clay.CornerRadiusAll(8),
+	{
+		layout = {
+			sizing = {clay.SizingGrow({}), clay.SizingFit({})},
+			padding = {16, 16, 12, 12},
+			childGap = 8,
+			layoutDirection = .TopToBottom,
 		},
+		backgroundColor = card_color,
+		cornerRadius = clay.CornerRadiusAll(8),
+	},
 	) {
 		// Container name
 		clay.TextDynamic(
@@ -389,12 +391,7 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 
 		// Container details row
 		if clay.UI()(
-			{
-				layout = {
-					sizing = {clay.SizingGrow({}), clay.SizingFit({})},
-					childGap = 16,
-				},
-			},
+		{layout = {sizing = {clay.SizingGrow({}), clay.SizingFit({})}, childGap = 16}},
 		) {
 			// Image
 			clay.TextDynamic(
@@ -412,14 +409,18 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 			clay.TextDynamic(
 				container.Status != "" ? container.Status : container.State,
 				clay.TextConfig(
-					{textColor = status_color, fontId = FONT_ID_BODY, fontSize = FONT_SIZE_BODY - 2},
+					{
+						textColor = status_color,
+						fontId = FONT_ID_BODY,
+						fontSize = FONT_SIZE_BODY - 2,
+					},
 				),
 			)
 		}
 
 		// Floating action buttons (only visible on hover)
 		if card_hovered {
-		if clay.UI(action_container_id)(
+			if clay.UI(action_container_id)(
 			{
 				layout = {
 					sizing = {clay.SizingFit({}), clay.SizingFit({})},
@@ -432,24 +433,25 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 					attachment = {element = .RightCenter, parent = .RightCenter},
 				},
 			},
-		) {
-			// Start/Stop button
-			is_running := container.State == "running"
-			startstop_btn_color := is_running ? COLOR_STATUS_STOPPED : COLOR_STATUS_RUNNING
-			if clay.PointerOver(startstop_btn_id) {
-				startstop_btn_color = is_running ? clay.Color{255, 100, 100, 255} : clay.Color{100, 200, 100, 255}
+			) {
+				// Start/Stop button
+				is_running := container.State == "running"
+				startstop_btn_color := is_running ? COLOR_STATUS_STOPPED : COLOR_STATUS_RUNNING
+				if clay.PointerOver(startstop_btn_id) {
+					startstop_btn_color =
+						is_running ? clay.Color{255, 100, 100, 255} : clay.Color{100, 200, 100, 255}
 
-				// Handle click
-				if rl.IsMouseButtonPressed(.LEFT) {
-					if is_running {
-						docker.stop_container(container.Id)
-					} else {
-						docker.start_container(container.Id)
+					// Handle click
+					if rl.IsMouseButtonPressed(.LEFT) {
+						if is_running {
+							docker.stop_container(container.Id)
+						} else {
+							docker.start_container(container.Id)
+						}
 					}
 				}
-			}
 
-			if clay.UI(startstop_btn_id)(
+				if clay.UI(startstop_btn_id)(
 				{
 					layout = {
 						sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
@@ -459,22 +461,18 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 					backgroundColor = startstop_btn_color,
 					cornerRadius = clay.CornerRadiusAll(4),
 				},
-			) {
-				// Play or Stop icon
-				icon_texture := is_running ? &icons.stop : &icons.play
-				if clay.UI()(
+				) {
+					// Play or Stop icon
+					icon_texture := is_running ? &icons.stop : &icons.play
+					if clay.UI()(
 					{
-						layout = {
-							sizing = {clay.SizingFixed(16), clay.SizingFixed(16)},
-						},
-						image = {
-							imageData = icon_texture,
-						},
+						layout = {sizing = {clay.SizingFixed(16), clay.SizingFixed(16)}},
+						image = {imageData = icon_texture},
 					},
-				) {}
-			}
+					) {}
+				}
 
-			// Logs button
+				// Logs button
 				logs_btn_color := COLOR_BUTTON
 				if clay.PointerOver(logs_btn_id) {
 					logs_btn_color = COLOR_BUTTON_HOVER
@@ -486,26 +484,22 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 				}
 
 				if clay.UI(logs_btn_id)(
-					{
-						layout = {
-							sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
-							padding = {6, 6, 6, 6},
-							childAlignment = {x = .Center, y = .Center},
-						},
-						backgroundColor = logs_btn_color,
-						cornerRadius = clay.CornerRadiusAll(4),
+				{
+					layout = {
+						sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
+						padding = {6, 6, 6, 6},
+						childAlignment = {x = .Center, y = .Center},
 					},
+					backgroundColor = logs_btn_color,
+					cornerRadius = clay.CornerRadiusAll(4),
+				},
 				) {
 					// Paragraph icon for logs
 					if clay.UI()(
-						{
-							layout = {
-								sizing = {clay.SizingFixed(16), clay.SizingFixed(16)},
-							},
-							image = {
-								imageData = &icons.paragraph,
-							},
-						},
+					{
+						layout = {sizing = {clay.SizingFixed(16), clay.SizingFixed(16)}},
+						image = {imageData = &icons.paragraph},
+					},
 					) {}
 				}
 
@@ -522,26 +516,22 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 					}
 
 					if clay.UI(terminal_btn_id)(
-						{
-							layout = {
-								sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
-								padding = {6, 6, 6, 6},
-								childAlignment = {x = .Center, y = .Center},
-							},
-							backgroundColor = terminal_btn_color,
-							cornerRadius = clay.CornerRadiusAll(4),
+					{
+						layout = {
+							sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
+							padding = {6, 6, 6, 6},
+							childAlignment = {x = .Center, y = .Center},
 						},
+						backgroundColor = terminal_btn_color,
+						cornerRadius = clay.CornerRadiusAll(4),
+					},
 					) {
 						// Terminal icon
 						if clay.UI()(
-							{
-								layout = {
-									sizing = {clay.SizingFixed(16), clay.SizingFixed(16)},
-								},
-								image = {
-									imageData = &icons.terminal,
-								},
-							},
+						{
+							layout = {sizing = {clay.SizingFixed(16), clay.SizingFixed(16)}},
+							image = {imageData = &icons.terminal},
+						},
 						) {}
 					}
 				}
@@ -586,9 +576,13 @@ get_container_project :: proc(container: docker.ContainerSummary) -> string {
 }
 
 @(private)
-render_project_group :: proc(project: string, containers: []docker.ContainerSummary, container_index: ^u32) {
+render_project_group :: proc(
+	project: string,
+	containers: []docker.ContainerSummary,
+	container_index: ^u32,
+) {
 	is_collapsed := collapsed_projects[project] or_else false
-	
+
 	// Determine if project is running (any container running)
 	project_is_running := false
 	for container in containers {
@@ -597,20 +591,22 @@ render_project_group :: proc(project: string, containers: []docker.ContainerSumm
 			break
 		}
 	}
-	
+
 	// Pre-compute element IDs
 	header_id := clay.GetElementId(clay.MakeString(project))
-	project_startstop_id := clay.GetElementId(clay.MakeString(strings.concatenate({project, "_startstop"}, context.temp_allocator)))
-	
+	project_startstop_id := clay.GetElementId(
+		clay.MakeString(strings.concatenate({project, "_startstop"}, context.temp_allocator)),
+	)
+
 	// Project group container
 	if clay.UI()(
-		{
-			layout = {
-				sizing = {clay.SizingGrow({}), clay.SizingFit({})},
-				childGap = 4,
-				layoutDirection = .TopToBottom,
-			},
+	{
+		layout = {
+			sizing = {clay.SizingGrow({}), clay.SizingFit({})},
+			childGap = 4,
+			layoutDirection = .TopToBottom,
 		},
+	},
 	) {
 		// Clickable header
 		header_color := COLOR_HEADER
@@ -619,33 +615,31 @@ render_project_group :: proc(project: string, containers: []docker.ContainerSumm
 		}
 
 		// Handle click to toggle collapse - but not if clicking the start/stop button
-		if clay.PointerOver(header_id) && !clay.PointerOver(project_startstop_id) && rl.IsMouseButtonPressed(.LEFT) {
+		if clay.PointerOver(header_id) &&
+		   !clay.PointerOver(project_startstop_id) &&
+		   rl.IsMouseButtonPressed(.LEFT) {
 			collapsed_projects[project] = !is_collapsed
 			is_collapsed = !is_collapsed
 		}
 
 		if clay.UI(header_id)(
-			{
-				layout = {
-					sizing = {clay.SizingGrow({}), clay.SizingFit({})},
-					padding = {12, 12, 8, 8},
-					childGap = 8,
-				},
-				backgroundColor = header_color,
-				cornerRadius = clay.CornerRadiusAll(6),
+		{
+			layout = {
+				sizing = {clay.SizingGrow({}), clay.SizingFit({})},
+				padding = {12, 12, 8, 8},
+				childGap = 8,
 			},
+			backgroundColor = header_color,
+			cornerRadius = clay.CornerRadiusAll(6),
+		},
 		) {
 			// Collapse indicator icon
 			icon_texture := is_collapsed ? &icons.chevron_right : &icons.chevron_down
 			if clay.UI()(
-				{
-					layout = {
-						sizing = {clay.SizingFixed(16), clay.SizingFixed(16)},
-					},
-					image = {
-						imageData = icon_texture,
-					},
-				},
+			{
+				layout = {sizing = {clay.SizingFixed(16), clay.SizingFixed(16)}},
+				image = {imageData = icon_texture},
+			},
 			) {}
 
 			// Project name
@@ -657,19 +651,27 @@ render_project_group :: proc(project: string, containers: []docker.ContainerSumm
 			)
 
 			// Container count
-			count_str := strings.concatenate({"(", int_to_string(len(containers)), ")"}, context.temp_allocator)
+			count_str := strings.concatenate(
+				{"(", int_to_string(len(containers)), ")"},
+				context.temp_allocator,
+			)
 			clay.TextDynamic(
 				count_str,
 				clay.TextConfig(
-					{textColor = COLOR_TEXT_SECONDARY, fontId = FONT_ID_BODY, fontSize = FONT_SIZE_BODY - 2},
+					{
+						textColor = COLOR_TEXT_SECONDARY,
+						fontId = FONT_ID_BODY,
+						fontSize = FONT_SIZE_BODY - 2,
+					},
 				),
 			)
-			
+
 			// Floating start/stop button for project
 			project_btn_color := project_is_running ? COLOR_STATUS_STOPPED : COLOR_STATUS_RUNNING
 			if clay.PointerOver(project_startstop_id) {
-				project_btn_color = project_is_running ? clay.Color{255, 100, 100, 255} : clay.Color{100, 200, 100, 255}
-				
+				project_btn_color =
+					project_is_running ? clay.Color{255, 100, 100, 255} : clay.Color{100, 200, 100, 255}
+
 				// Handle click - start or stop all containers in project
 				if rl.IsMouseButtonPressed(.LEFT) {
 					for container in containers {
@@ -681,34 +683,30 @@ render_project_group :: proc(project: string, containers: []docker.ContainerSumm
 					}
 				}
 			}
-			
+
 			if clay.UI(project_startstop_id)(
-				{
-					layout = {
-						sizing = {clay.SizingFixed(24), clay.SizingFixed(24)},
-						padding = {4, 4, 4, 4},
-						childAlignment = {x = .Center, y = .Center},
-					},
-					backgroundColor = project_btn_color,
-					cornerRadius = clay.CornerRadiusAll(4),
-					floating = {
-						attachTo = .Parent,
-						attachment = {element = .RightCenter, parent = .RightCenter},
-						offset = {-8, 0},
-					},
+			{
+				layout = {
+					sizing = {clay.SizingFixed(24), clay.SizingFixed(24)},
+					padding = {4, 4, 4, 4},
+					childAlignment = {x = .Center, y = .Center},
 				},
+				backgroundColor = project_btn_color,
+				cornerRadius = clay.CornerRadiusAll(4),
+				floating = {
+					attachTo = .Parent,
+					attachment = {element = .RightCenter, parent = .RightCenter},
+					offset = {-8, 0},
+				},
+			},
 			) {
 				// Play or Stop icon
 				project_icon := project_is_running ? &icons.stop : &icons.play
 				if clay.UI()(
-					{
-						layout = {
-							sizing = {clay.SizingFixed(14), clay.SizingFixed(14)},
-						},
-						image = {
-							imageData = project_icon,
-						},
-					},
+				{
+					layout = {sizing = {clay.SizingFixed(14), clay.SizingFixed(14)}},
+					image = {imageData = project_icon},
+				},
 				) {}
 			}
 		}
@@ -717,14 +715,14 @@ render_project_group :: proc(project: string, containers: []docker.ContainerSumm
 		if !is_collapsed {
 			// Container list with left padding for indentation
 			if clay.UI()(
-				{
-					layout = {
-						sizing = {clay.SizingGrow({}), clay.SizingFit({})},
-						padding = {left = 16},
-						childGap = 4,
-						layoutDirection = .TopToBottom,
-					},
+			{
+				layout = {
+					sizing = {clay.SizingGrow({}), clay.SizingFit({})},
+					padding = {left = 16},
+					childGap = 4,
+					layoutDirection = .TopToBottom,
 				},
+			},
 			) {
 				for container in containers {
 					render_container_card(container, container_index^)
@@ -743,25 +741,25 @@ int_to_string :: proc(n: int, allocator := context.temp_allocator) -> string {
 	if n == 0 {
 		return "0"
 	}
-	
+
 	buf: [20]u8
 	i := len(buf)
 	num := n
 	if num < 0 {
 		num = -num
 	}
-	
+
 	for num > 0 {
 		i -= 1
 		buf[i] = u8('0' + num % 10)
 		num /= 10
 	}
-	
+
 	if n < 0 {
 		i -= 1
 		buf[i] = '-'
 	}
-	
+
 	return strings.clone(string(buf[i:]), allocator)
 }
 
@@ -817,7 +815,14 @@ clay_raylib_render :: proc(
 			config := render_command.renderData.rectangle
 			if config.cornerRadius.topLeft > 0 {
 				radius: f32 = (config.cornerRadius.topLeft * 2) / min(bounds.width, bounds.height)
-				draw_rect_rounded(bounds.x, bounds.y, bounds.width, bounds.height, radius, config.backgroundColor)
+				draw_rect_rounded(
+					bounds.x,
+					bounds.y,
+					bounds.width,
+					bounds.height,
+					radius,
+					config.backgroundColor,
+				)
 			} else {
 				draw_rect(bounds.x, bounds.y, bounds.width, bounds.height, config.backgroundColor)
 			}
@@ -858,7 +863,9 @@ clay_raylib_render :: proc(
 				draw_rect(
 					bounds.x + config.cornerRadius.bottomLeft,
 					bounds.y + bounds.height - f32(config.width.bottom),
-					bounds.width - config.cornerRadius.bottomLeft - config.cornerRadius.bottomRight,
+					bounds.width -
+					config.cornerRadius.bottomLeft -
+					config.cornerRadius.bottomRight,
 					f32(config.width.bottom),
 					config.color,
 				)
@@ -969,41 +976,46 @@ get_mono_char_width :: proc() -> f32 {
 
 // Calculate character index from mouse position relative to text area
 @(private)
-get_char_index_at_position :: proc(mouse_x, mouse_y: f32, text: string, text_bounds: clay.BoundingBox, scroll_offset: clay.Vector2) -> int {
+get_char_index_at_position :: proc(
+	mouse_x, mouse_y: f32,
+	text: string,
+	text_bounds: clay.BoundingBox,
+	scroll_offset: clay.Vector2,
+) -> int {
 	if len(text) == 0 {
 		return 0
 	}
-	
+
 	char_width := get_mono_char_width()
 	line_height := f32(FONT_SIZE_LOG)
-	
+
 	// Calculate relative position within text bounds, accounting for scroll
 	// scroll_offset.y is negative when scrolled down, so we subtract it to get the actual text position
 	rel_x := mouse_x - text_bounds.x
 	rel_y := mouse_y - text_bounds.y - scroll_offset.y
-	
+
 	// Clamp to valid range
-	if rel_x < 0 { rel_x = 0 }
-	if rel_y < 0 { rel_y = 0 }
-	
+	if rel_x < 0 {rel_x = 0}
+	if rel_y < 0 {rel_y = 0}
+
 	// Split text into lines to calculate position
 	lines := strings.split(text, "\n", allocator = context.temp_allocator)
-	
+
 	// Calculate which line we're on
 	line_index := int(rel_y / line_height)
-	if line_index < 0 { line_index = 0 }
-	if line_index >= len(lines) { line_index = len(lines) - 1 }
-	
+	if line_index < 0 {line_index = 0}
+	if line_index >= len(lines) {line_index = len(lines) - 1}
+
 	// Calculate character position within the line
 	char_in_line := int(rel_x / char_width)
-	if char_in_line < 0 { char_in_line = 0 }
-	
+	if char_in_line < 0 {char_in_line = 0}
+
 	// Calculate absolute character index
 	char_index := 0
-	for i in 0..<line_index {
-		char_index += len(lines[i]) + 1  // +1 for newline
+	for i in 0 ..< line_index {
+		char_index += len(lines[i]) + 1 // +1 for newline
 	}
-	
+
 	// Add position within current line
 	if line_index < len(lines) {
 		line_len := len(lines[line_index])
@@ -1012,12 +1024,12 @@ get_char_index_at_position :: proc(mouse_x, mouse_y: f32, text: string, text_bou
 		}
 		char_index += char_in_line
 	}
-	
+
 	// Clamp to text length
 	if char_index > len(text) {
 		char_index = len(text)
 	}
-	
+
 	return char_index
 }
 
@@ -1035,14 +1047,14 @@ get_selected_log_text :: proc(text: string) -> string {
 	if log_selection_start < 0 || log_selection_end < 0 {
 		return ""
 	}
-	
+
 	start := min(log_selection_start, log_selection_end)
 	end := max(log_selection_start, log_selection_end)
-	
+
 	if start >= len(text) || end > len(text) || start == end {
 		return ""
 	}
-	
+
 	return text[start:end]
 }
 
@@ -1051,15 +1063,18 @@ get_selected_log_text :: proc(text: string) -> string {
 render_log_overlay :: proc() {
 	screen_width := f32(rl.GetScreenWidth())
 	screen_height := f32(rl.GetScreenHeight())
-	
+
 	// Get log content early for selection handling
 	log_content := docker.get_log_content(context.temp_allocator)
-	
+
 	// Handle copy shortcut (Cmd+C on macOS, Ctrl+C on others)
-	copy_pressed := (rl.IsKeyDown(.LEFT_SUPER) || rl.IsKeyDown(.RIGHT_SUPER) || 
-	                 rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL)) && 
-	                rl.IsKeyPressed(.C)
-	
+	copy_pressed :=
+		(rl.IsKeyDown(.LEFT_SUPER) ||
+			rl.IsKeyDown(.RIGHT_SUPER) ||
+			rl.IsKeyDown(.LEFT_CONTROL) ||
+			rl.IsKeyDown(.RIGHT_CONTROL)) &&
+		rl.IsKeyPressed(.C)
+
 	if copy_pressed && log_selection_start >= 0 && log_selection_end >= 0 {
 		selected_text := get_selected_log_text(log_content)
 		if len(selected_text) > 0 {
@@ -1067,10 +1082,10 @@ render_log_overlay :: proc() {
 			rl.SetClipboardText(cstr)
 		}
 	}
-	
+
 	// Semi-transparent overlay background (clicking closes the overlay)
 	overlay_id := clay.GetElementId(clay.MakeString("LogOverlayBg"))
-	
+
 	// Check if clicking outside the log panel (on the overlay background)
 	if clay.PointerOver(overlay_id) && rl.IsMouseButtonPressed(.LEFT) {
 		// Check if we're not over the log panel itself
@@ -1081,45 +1096,42 @@ render_log_overlay :: proc() {
 			return
 		}
 	}
-	
+
 	if clay.UI(overlay_id)(
-		{
-			layout = {
-				sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
-				childAlignment = {x = .Center, y = .Center},
-			},
-			floating = {
-				attachTo = .Root,
-				zIndex = 100,
-			},
-			backgroundColor = COLOR_OVERLAY,
+	{
+		layout = {
+			sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
+			childAlignment = {x = .Center, y = .Center},
 		},
+		floating = {attachTo = .Root, zIndex = 100},
+		backgroundColor = COLOR_OVERLAY,
+	},
 	) {
 		// Log panel
 		panel_id := clay.GetElementId(clay.MakeString("LogPanel"))
 		panel_width := screen_width * 0.8
 		panel_height := screen_height * 0.8
-		
+
 		if clay.UI(panel_id)(
-			{
-				layout = {
-					sizing = {clay.SizingFixed(panel_width), clay.SizingFixed(panel_height)},
-					padding = {16, 16, 16, 16},
-					childGap = 8,
-					layoutDirection = .TopToBottom,
-				},
-				backgroundColor = COLOR_LOG_BACKGROUND,
-				cornerRadius = clay.CornerRadiusAll(8),
+		{
+			layout = {
+				sizing = {clay.SizingFixed(panel_width), clay.SizingFixed(panel_height)},
+				padding = {16, 16, 16, 16},
+				childGap = 8,
+				layoutDirection = .TopToBottom,
 			},
+			backgroundColor = COLOR_LOG_BACKGROUND,
+			cornerRadius = clay.CornerRadiusAll(8),
+		},
 		) {
 			// Header with container name and close button
 			if clay.UI()(
-				{
-					layout = {
-						sizing = {clay.SizingGrow({}), clay.SizingFit({})},
-						childAlignment = {y = .Center},
-					},
+			{
+				layout = {
+					sizing = {clay.SizingGrow({}), clay.SizingFit({})},
+					childAlignment = {y = .Center},
 				},
+			},
 			) {
 				// Title
 				container_name := docker.get_log_container_name()
@@ -1130,10 +1142,10 @@ render_log_overlay :: proc() {
 						{textColor = COLOR_TEXT, fontId = FONT_ID_BODY, fontSize = FONT_SIZE_BODY},
 					),
 				)
-				
+
 				// Spacer
 				if clay.UI()({layout = {sizing = {clay.SizingGrow({}), clay.SizingFit({})}}}) {}
-				
+
 				// Close button
 				close_btn_id := clay.GetElementId(clay.MakeString("LogCloseBtn"))
 				close_btn_color := COLOR_CARD
@@ -1144,59 +1156,55 @@ render_log_overlay :: proc() {
 						docker.stop_log_stream()
 					}
 				}
-				
+
 				if clay.UI(close_btn_id)(
-					{
-						layout = {
-							sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
-							padding = {6, 6, 6, 6},
-							childAlignment = {x = .Center, y = .Center},
-						},
-						backgroundColor = close_btn_color,
-						cornerRadius = clay.CornerRadiusAll(4),
+				{
+					layout = {
+						sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
+						padding = {6, 6, 6, 6},
+						childAlignment = {x = .Center, y = .Center},
 					},
+					backgroundColor = close_btn_color,
+					cornerRadius = clay.CornerRadiusAll(4),
+				},
 				) {
 					// X icon for close button
 					if clay.UI()(
-						{
-							layout = {
-								sizing = {clay.SizingFixed(16), clay.SizingFixed(16)},
-							},
-							image = {
-								imageData = &icons.x,
-							},
-						},
+					{
+						layout = {sizing = {clay.SizingFixed(16), clay.SizingFixed(16)}},
+						image = {imageData = &icons.x},
+					},
 					) {}
 				}
 			}
-			
+
 			// Log content area with scroll
 			log_scroll_id := clay.GetElementId(clay.MakeString("LogScrollContainer"))
-			
+
 			if clay.UI(log_scroll_id)(
-				{
-					layout = {
-						sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
-						padding = {8, 8, 8, 8},
-						layoutDirection = .TopToBottom,
-					},
-					backgroundColor = COLOR_CARD,
-					cornerRadius = clay.CornerRadiusAll(4),
-					clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+			{
+				layout = {
+					sizing = {clay.SizingGrow({}), clay.SizingGrow({})},
+					padding = {8, 8, 8, 8},
+					layoutDirection = .TopToBottom,
 				},
+				backgroundColor = COLOR_CARD,
+				cornerRadius = clay.CornerRadiusAll(4),
+				clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+			},
 			) {
 				// Handle mouse selection within the log text area
 				log_text_id := clay.GetElementId(clay.MakeString("LogTextContent"))
 				mouse_over_log := clay.PointerOver(log_scroll_id)
 				mouse_pos := rl.GetMousePosition()
-				
+
 				// Get scroll offset for this specific container using GetScrollContainerData
 				scroll_container_data := clay.GetScrollContainerData(log_scroll_id)
 				scroll_offset: clay.Vector2 = {0, 0}
 				if scroll_container_data.found && scroll_container_data.scrollPosition != nil {
 					scroll_offset = scroll_container_data.scrollPosition^
 				}
-				
+
 				// Get the element data to know the bounds
 				scroll_data := clay.GetElementData(log_scroll_id)
 				if scroll_data.found {
@@ -1207,26 +1215,38 @@ render_log_overlay :: proc() {
 					log_text_bounds.width -= 16
 					log_text_bounds.height -= 16
 				}
-				
+
 				if mouse_over_log && len(log_content) > 0 {
 					// Handle mouse press - start selection
 					if rl.IsMouseButtonPressed(.LEFT) {
-						log_selection_start = get_char_index_at_position(mouse_pos.x, mouse_pos.y, log_content, log_text_bounds, scroll_offset)
+						log_selection_start = get_char_index_at_position(
+							mouse_pos.x,
+							mouse_pos.y,
+							log_content,
+							log_text_bounds,
+							scroll_offset,
+						)
 						log_selection_end = log_selection_start
 						log_is_selecting = true
 					}
-					
+
 					// Handle mouse drag - update selection end
 					if log_is_selecting && rl.IsMouseButtonDown(.LEFT) {
-						log_selection_end = get_char_index_at_position(mouse_pos.x, mouse_pos.y, log_content, log_text_bounds, scroll_offset)
+						log_selection_end = get_char_index_at_position(
+							mouse_pos.x,
+							mouse_pos.y,
+							log_content,
+							log_text_bounds,
+							scroll_offset,
+						)
 					}
 				}
-				
+
 				// Handle mouse release - end selection
 				if rl.IsMouseButtonReleased(.LEFT) {
 					log_is_selecting = false
 				}
-				
+
 				if len(log_content) > 0 {
 					// Render log text with selection
 					render_log_text_with_selection(log_content, log_text_id)
@@ -1268,31 +1288,33 @@ render_log_text_with_selection :: proc(text: string, element_id: clay.ElementId)
 @(private)
 draw_log_selection :: proc() {
 	// Check if there's a valid selection
-	if log_selection_start < 0 || log_selection_end < 0 || log_selection_start == log_selection_end {
+	if log_selection_start < 0 ||
+	   log_selection_end < 0 ||
+	   log_selection_start == log_selection_end {
 		return
 	}
-	
+
 	// Get log content
 	log_content := docker.get_log_content(context.temp_allocator)
 	if len(log_content) == 0 {
 		return
 	}
-	
+
 	// Calculate selection bounds
 	start := min(log_selection_start, log_selection_end)
 	end := max(log_selection_start, log_selection_end)
-	
+
 	// Clamp to valid range
-	if start < 0 { start = 0 }
-	if end > len(log_content) { end = len(log_content) }
+	if start < 0 {start = 0}
+	if end > len(log_content) {end = len(log_content)}
 	if start >= end {
 		return
 	}
-	
+
 	// Get character dimensions
 	char_width := get_mono_char_width()
 	line_height := f32(FONT_SIZE_LOG)
-	
+
 	// Get scroll offset for the log scroll container
 	log_scroll_id := clay.GetElementId(clay.MakeString("LogScrollContainer"))
 	scroll_container_data := clay.GetScrollContainerData(log_scroll_id)
@@ -1300,36 +1322,37 @@ draw_log_selection :: proc() {
 	if scroll_container_data.found && scroll_container_data.scrollPosition != nil {
 		scroll_offset = scroll_container_data.scrollPosition^
 	}
-	
+
 	// Calculate text bounds with scroll offset applied
 	text_x := log_text_bounds.x
 	text_y := log_text_bounds.y + scroll_offset.y
-	
+
 	// Split text into lines
 	lines := strings.split(log_content, "\n", allocator = context.temp_allocator)
-	
+
 	// Find which lines are selected
 	current_char := 0
 	selection_color := clay_color_to_rl_color(COLOR_SELECTION)
-	
+
 	for line, line_idx in lines {
 		line_start := current_char
 		line_end := current_char + len(line)
-		
+
 		// Check if this line overlaps with selection
 		if line_end >= start && line_start < end {
 			// Calculate selection within this line
 			sel_start_in_line := max(0, start - line_start)
 			sel_end_in_line := min(len(line), end - line_start)
-			
+
 			// Calculate rectangle position
 			rect_x := text_x + f32(sel_start_in_line) * char_width
 			rect_y := text_y + f32(line_idx) * line_height
 			rect_width := f32(sel_end_in_line - sel_start_in_line) * char_width
 			rect_height := line_height
-			
+
 			// Only draw if within visible bounds (basic culling)
-			if rect_y + rect_height >= log_text_bounds.y && rect_y <= log_text_bounds.y + log_text_bounds.height {
+			if rect_y + rect_height >= log_text_bounds.y &&
+			   rect_y <= log_text_bounds.y + log_text_bounds.height {
 				// Clip to text bounds
 				if rect_y < log_text_bounds.y {
 					clip_amount := log_text_bounds.y - rect_y
@@ -1339,7 +1362,7 @@ draw_log_selection :: proc() {
 				if rect_y + rect_height > log_text_bounds.y + log_text_bounds.height {
 					rect_height = log_text_bounds.y + log_text_bounds.height - rect_y
 				}
-				
+
 				if rect_height > 0 {
 					rl.DrawRectangle(
 						i32(rect_x),
@@ -1351,8 +1374,7 @@ draw_log_selection :: proc() {
 				}
 			}
 		}
-		
-		current_char = line_end + 1  // +1 for newline
+
+		current_char = line_end + 1 // +1 for newline
 	}
 }
-

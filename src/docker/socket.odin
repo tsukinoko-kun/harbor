@@ -2,10 +2,11 @@
 package docker
 
 import "core:c"
+import "core:fmt"
 
 foreign import libc "system:c"
 
-@(default_calling_convention="c")
+@(default_calling_convention = "c")
 foreign libc {
 	socket :: proc(domain: c.int, type: c.int, protocol: c.int) -> c.int ---
 	connect :: proc(sockfd: c.int, addr: rawptr, addrlen: c.uint) -> c.int ---
@@ -17,26 +18,36 @@ foreign libc {
 
 AF_UNIX :: 1
 SOCK_STREAM :: 1
-SOL_SOCKET :: 1
 
 when ODIN_OS == .Darwin {
 	// macOS uses different socket option constants
-	SO_RCVTIMEO :: 4102
-	SO_SNDTIMEO :: 4101
+	SOL_SOCKET :: 0xFFFF
+	SO_RCVTIMEO :: 0x1006
+	SO_SNDTIMEO :: 0x1005
 } else {
 	// Linux uses these values
+	SOL_SOCKET :: 1
 	SO_RCVTIMEO :: 20
 	SO_SNDTIMEO :: 21
 }
 
 SOCKADDR_UN :: struct {
 	sun_family: c.ushort,
-	sun_path: [108]u8,
+	sun_path:   [108]u8,
 }
 
-TIMEVAL :: struct {
-	tv_sec: c.long,
-	tv_usec: c.long,
+when ODIN_OS == .Darwin {
+	// macOS timeval uses 32-bit tv_usec (suseconds_t is int32_t on macOS)
+	TIMEVAL :: struct {
+		tv_sec:  c.long,
+		tv_usec: c.int32_t,
+	}
+} else {
+	// Linux timeval uses long for both fields
+	TIMEVAL :: struct {
+		tv_sec:  c.long,
+		tv_usec: c.long,
+	}
 }
 
 DOCKER_SOCKET_PATH :: "/var/run/docker.sock"
@@ -50,29 +61,40 @@ connect_unix_socket :: proc(socket_path: string) -> (sock: Socket, ok: bool) {
 	if sockfd < 0 {
 		return Socket{}, false
 	}
-	
+
 	// Set socket timeouts to prevent indefinite blocking
 	// 5 second timeout for receive and send operations
-	// If this fails, we continue anyway - timeout is a safety feature
 	timeout: TIMEVAL
 	timeout.tv_sec = 5
 	timeout.tv_usec = 0
 	timeout_len := cast(c.uint)size_of(TIMEVAL)
-	
-	// Try to set receive timeout (non-fatal if it fails)
-	setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, timeout_len)
-	
-	// Try to set send timeout (non-fatal if it fails)
-	setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, timeout_len)
-	
+
+	// Set receive timeout
+	recv_result := setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, timeout_len)
+	if recv_result < 0 {
+		fmt.eprintf(
+			"Warning: Failed to set socket receive timeout (setsockopt returned %d)\n",
+			recv_result,
+		)
+	}
+
+	// Set send timeout
+	send_result := setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, timeout_len)
+	if send_result < 0 {
+		fmt.eprintf(
+			"Warning: Failed to set socket send timeout (setsockopt returned %d)\n",
+			send_result,
+		)
+	}
+
 	addr := create_socket_address(socket_path)
 	addr_len := calculate_address_length(socket_path)
-	
+
 	if connect(sockfd, &addr, cast(c.uint)addr_len) < 0 {
 		close(sockfd)
 		return Socket{}, false
 	}
-	
+
 	return Socket{handle = cast(rawptr)uintptr(sockfd)}, true
 }
 
@@ -80,12 +102,12 @@ create_socket_address :: proc(socket_path: string) -> SOCKADDR_UN {
 	addr: SOCKADDR_UN
 	addr.sun_family = AF_UNIX
 	copy(addr.sun_path[:], socket_path)
-	
+
 	path_len := len(socket_path)
 	if path_len < 107 {
 		addr.sun_path[path_len] = 0
 	}
-	
+
 	return addr
 }
 

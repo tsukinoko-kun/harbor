@@ -40,9 +40,21 @@ remove_socket_timeout :: proc(sock: Socket) -> bool {
 	timeout.tv_sec = 0
 	timeout.tv_usec = 0
 	timeout_len := cast(c.uint)size_of(TIMEVAL)
-	
-	result1 := setsockopt(cast(c.int)uintptr(sock.handle), SOL_SOCKET, SO_RCVTIMEO, &timeout, timeout_len)
-	result2 := setsockopt(cast(c.int)uintptr(sock.handle), SOL_SOCKET, SO_SNDTIMEO, &timeout, timeout_len)
-	
+
+	result1 := setsockopt(
+		cast(c.int)uintptr(sock.handle),
+		SOL_SOCKET,
+		SO_RCVTIMEO,
+		&timeout,
+		timeout_len,
+	)
+	result2 := setsockopt(
+		cast(c.int)uintptr(sock.handle),
+		SOL_SOCKET,
+		SO_SNDTIMEO,
+		&timeout,
+		timeout_len,
+	)
+
 	return result1 >= 0 && result2 >= 0
 }

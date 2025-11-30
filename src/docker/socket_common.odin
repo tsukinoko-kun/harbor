@@ -15,14 +15,14 @@ get_connection :: proc() -> (Socket, bool) {
 		// For now, we'll just return it and let the caller handle errors
 		return global_connection, true
 	}
-	
+
 	// Establish new connection
 	socket_path := DOCKER_SOCKET_PATH
 	new_sock, connect_ok := connect_docker_socket(socket_path)
 	if !connect_ok {
 		return Socket{}, false
 	}
-	
+
 	global_connection = new_sock
 	connection_established = true
 	return new_sock, true
@@ -33,7 +33,7 @@ ensure_connection :: proc() -> (Socket, bool) {
 	if !conn_ok {
 		return Socket{}, false
 	}
-	
+
 	// If we get here and connection_established is true, return it
 	// Errors will be handled by the caller when they try to use it
 	return conn, true
@@ -46,4 +46,3 @@ reset_connection :: proc() {
 		global_connection = Socket{}
 	}
 }
-

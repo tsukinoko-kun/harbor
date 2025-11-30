@@ -8,7 +8,7 @@ DOCKER_SOCKET_PATH :: "\\\\.\\pipe\\docker_engine"
 connect_named_pipe :: proc(pipe_path: string) -> (sock: Socket, ok: bool) {
 	// Convert string to UTF-16 for Windows API
 	wide_path := win.utf8_to_wstring(pipe_path)
-	
+
 	handle := win.CreateFileW(
 		wide_path,
 		win.GENERIC_READ | win.GENERIC_WRITE,
@@ -18,11 +18,11 @@ connect_named_pipe :: proc(pipe_path: string) -> (sock: Socket, ok: bool) {
 		0,
 		nil,
 	)
-	
+
 	if handle == win.INVALID_HANDLE_VALUE {
 		return Socket{}, false
 	}
-	
+
 	return Socket{handle = cast(rawptr)handle}, true
 }
 
@@ -67,4 +67,3 @@ receive_data :: proc(sock: Socket, buffer: []u8) -> (int, bool) {
 connect_docker_socket :: proc(socket_path: string) -> (sock: Socket, ok: bool) {
 	return connect_named_pipe(socket_path)
 }
-
