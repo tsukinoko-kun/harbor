@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+env:
+  HOMEBREW_TAP: tsukinoko-kun/homebrew-tap
+
 permissions:
   contents: write
 
@@ -102,3 +105,103 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    name: Update Homebrew Tap
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Calculate SHA256 checksums
+        id: sha
+        run: |
+          echo "macos_arm64=$(sha256sum artifacts/macos-arm64/harbor-macos-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=$(sha256sum artifacts/linux-amd64/harbor-linux-amd64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract version
+        id: version
+        run: |
+          # Remove 'v' prefix from tag
+          echo "number=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Cask
+        run: |
+          mkdir -p Casks
+          cat > Casks/harbor.rb << 'CASK_EOF'
+          cask "harbor" do
+            version "${{ steps.version.outputs.number }}"
+
+            on_arm do
+              sha256 "${{ steps.sha.outputs.macos_arm64 }}"
+              url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/harbor-macos-arm64.tar.gz"
+            end
+
+            name "Harbor"
+            desc "GUI application for Docker"
+            homepage "https://github.com/${{ github.repository }}"
+
+            binary "harbor"
+          end
+          CASK_EOF
+
+      - name: Generate Formula
+        run: |
+          mkdir -p Formula
+          cat > Formula/harbor.rb << 'FORMULA_EOF'
+          class Harbor < Formula
+            desc "GUI application for Docker"
+            homepage "https://github.com/${{ github.repository }}"
+            version "${{ steps.version.outputs.number }}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/harbor-macos-arm64.tar.gz"
+                sha256 "${{ steps.sha.outputs.macos_arm64 }}"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/harbor-linux-amd64.tar.gz"
+                sha256 "${{ steps.sha.outputs.linux_amd64 }}"
+              end
+            end
+
+            def install
+              bin.install "harbor"
+            end
+
+            test do
+              assert_predicate bin/"harbor", :executable?
+            end
+          end
+          FORMULA_EOF
+
+      - name: Push to Homebrew Tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${{ env.HOMEBREW_TAP }}.git" tap
+
+          mkdir -p tap/Casks tap/Formula
+          cp Casks/harbor.rb tap/Casks/
+          cp Formula/harbor.rb tap/Formula/
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add Casks/harbor.rb Formula/harbor.rb
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update harbor to ${{ github.ref_name }}"
+            git push
+          fi
