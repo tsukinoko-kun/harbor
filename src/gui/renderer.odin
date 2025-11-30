@@ -53,12 +53,16 @@ ICON_PARAGRAPH :: #load("../../assets/icons/paragraph.png", []u8)
 @(private)
 ICON_X :: #load("../../assets/icons/x.png", []u8)
 
+@(private)
+ICON_TERMINAL :: #load("../../assets/icons/terminal.png", []u8)
+
 // Icon textures struct
 Icons :: struct {
 	chevron_down:  rl.Texture2D,
 	chevron_right: rl.Texture2D,
 	paragraph:     rl.Texture2D,
 	x:             rl.Texture2D,
+	terminal:      rl.Texture2D,
 }
 
 @(private)
@@ -197,6 +201,7 @@ init :: proc() {
 	icons.chevron_right = load_icon(ICON_CHEVRON_RIGHT)
 	icons.paragraph = load_icon(ICON_PARAGRAPH)
 	icons.x = load_icon(ICON_X)
+	icons.terminal = load_icon(ICON_TERMINAL)
 }
 
 shutdown :: proc() {
@@ -208,6 +213,7 @@ shutdown :: proc() {
 	rl.UnloadTexture(icons.chevron_right)
 	rl.UnloadTexture(icons.paragraph)
 	rl.UnloadTexture(icons.x)
+	rl.UnloadTexture(icons.terminal)
 	
 	for rf in raylib_fonts {
 		rl.UnloadFont(rf.font)
@@ -339,9 +345,10 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 	element_id := clay.GetElementIdWithIndex(clay.MakeString("ContainerCard"), index)
 	action_container_id := clay.GetElementIdWithIndex(clay.MakeString("CardActions"), index)
 	logs_btn_id := clay.GetElementIdWithIndex(clay.MakeString("LogsBtn"), index)
+	terminal_btn_id := clay.GetElementIdWithIndex(clay.MakeString("TerminalBtn"), index)
 
 	// Check hover state - include floating action elements to prevent flickering
-	card_hovered := clay.PointerOver(element_id) || clay.PointerOver(action_container_id) || clay.PointerOver(logs_btn_id)
+	card_hovered := clay.PointerOver(element_id) || clay.PointerOver(action_container_id) || clay.PointerOver(logs_btn_id) || clay.PointerOver(terminal_btn_id)
 	card_color := COLOR_CARD
 	if card_hovered {
 		card_color = COLOR_CARD_HOVER
@@ -446,6 +453,43 @@ render_container_card :: proc(container: docker.ContainerSummary, index: u32) {
 							},
 						},
 					) {}
+				}
+
+				// Terminal button (only for running containers)
+				if container.State == "running" {
+					terminal_btn_color := COLOR_BUTTON
+					if clay.PointerOver(terminal_btn_id) {
+						terminal_btn_color = COLOR_BUTTON_HOVER
+
+						// Handle click
+						if rl.IsMouseButtonPressed(.LEFT) {
+							docker.open_container_shell(container.Id, name)
+						}
+					}
+
+					if clay.UI(terminal_btn_id)(
+						{
+							layout = {
+								sizing = {clay.SizingFixed(28), clay.SizingFixed(28)},
+								padding = {6, 6, 6, 6},
+								childAlignment = {x = .Center, y = .Center},
+							},
+							backgroundColor = terminal_btn_color,
+							cornerRadius = clay.CornerRadiusAll(4),
+						},
+					) {
+						// Terminal icon
+						if clay.UI()(
+							{
+								layout = {
+									sizing = {clay.SizingFixed(16), clay.SizingFixed(16)},
+								},
+								image = {
+									imageData = &icons.terminal,
+								},
+							},
+						) {}
+					}
 				}
 			}
 		}
