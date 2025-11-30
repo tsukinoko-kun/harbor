@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-amd64
+            odin-target: linux_amd64
+            binary: harbor
+            archive: harbor-linux-amd64.tar.gz
+          - os: macos-14
+            target: macos-arm64
+            odin-target: darwin_arm64
+            binary: harbor
+            archive: harbor-macos-arm64.tar.gz
+          - os: windows-latest
+            target: windows-amd64
+            odin-target: windows_amd64
+            binary: harbor.exe
+            archive: harbor-windows-amd64.zip
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.target }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
+
+      - name: Build
+        run: |
+          odin build src -out:${{ matrix.binary }} -target:${{ matrix.odin-target }} -o:speed
+
+      - name: Create archive (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          tar -czvf ${{ matrix.archive }} ${{ matrix.binary }}
+
+      - name: Create archive (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ${{ matrix.binary }} -DestinationPath ${{ matrix.archive }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ matrix.archive }}
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Create Release
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+
+      - name: Generate checksums
+        working-directory: release
+        run: |
+          sha256sum * > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
