@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -19,7 +19,7 @@ jobs:
             odin-target: linux_amd64
             binary: harbor
             archive: harbor-linux-amd64.tar.gz
-          - os: macos-14
+          - os: macos-26
             target: macos-arm64
             odin-target: darwin_arm64
             binary: harbor
@@ -102,4 +102,3 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
