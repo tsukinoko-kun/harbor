@@ -1,5 +1,7 @@
 # Harbor
 
+<img src="https://raw.githubusercontent.com/tsukinoko-kun/harbor/refs/heads/main/icon.png" width="64">
+
 Docker GUI
 
 ## Install
