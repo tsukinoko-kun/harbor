@@ -85,7 +85,10 @@ jobs:
       - name: Create archive (macOS)
         if: startsWith(matrix.os, 'macos')
         run: |
+          # App bundle for Cask
           tar -czvf ${{ matrix.archive }} Harbor.app
+          # CLI binary for Formula
+          tar -czvf harbor-macos-arm64-cli.tar.gz ${{ matrix.binary }}
 
       - name: Create archive (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -103,6 +106,14 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: ${{ matrix.archive }}
+          retention-days: 1
+
+      - name: Upload CLI artifact (macOS)
+        if: startsWith(matrix.os, 'macos')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-cli
+          path: harbor-macos-arm64-cli.tar.gz
           retention-days: 1
 
   release:
@@ -153,6 +164,7 @@ jobs:
         id: sha
         run: |
           echo "macos_arm64=$(sha256sum artifacts/macos-arm64/harbor-macos-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "macos_arm64_cli=$(sha256sum artifacts/macos-arm64-cli/harbor-macos-arm64-cli.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "linux_amd64=$(sha256sum artifacts/linux-amd64/harbor-linux-amd64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Extract version
@@ -193,8 +205,8 @@ jobs:
 
             on_macos do
               on_arm do
-                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/harbor-macos-arm64.tar.gz"
-                sha256 "${{ steps.sha.outputs.macos_arm64 }}"
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/harbor-macos-arm64-cli.tar.gz"
+                sha256 "${{ steps.sha.outputs.macos_arm64_cli }}"
               end
             end
 
