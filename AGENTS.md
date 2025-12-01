@@ -17,3 +17,5 @@ If you need to vendor libraries, use the `vendor` directory. Don't modify code i
 Keep the functions small and focused. Use CLEAN code principles. Create new files and directories as needed to keep everything organized.
 
 Use the UNIX socket on Linux and macOS. Use the named pipe on Windows. Avoid spreading OS specific code throughout the codebase.
+
+Use `odinfmt . -w` to format the Odin code after editing it.
