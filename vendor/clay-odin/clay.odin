@@ -18,14 +18,14 @@ when ODIN_OS == .Windows {
 
 String :: struct {
 	isStaticallyAllocated: c.bool,
-	length: c.int32_t,
-	chars:  [^]c.char,
+	length:                c.int32_t,
+	chars:                 [^]c.char,
 }
 
 StringSlice :: struct {
-	length: c.int32_t,
-	chars:  [^]c.char,
-	baseChars:  [^]c.char,
+	length:    c.int32_t,
+	chars:     [^]c.char,
+	baseChars: [^]c.char,
 }
 
 Vector2 :: [2]c.float
@@ -87,7 +87,7 @@ RenderCommandType :: enum EnumBackingType {
 }
 
 RectangleElementConfig :: struct {
-	color:        Color,
+	color: Color,
 }
 
 TextWrapMode :: enum EnumBackingType {
@@ -103,22 +103,22 @@ TextAlignment :: enum EnumBackingType {
 }
 
 TextElementConfig :: struct {
-	userData:           rawptr,
-	textColor:          Color,
-	fontId:             u16,
-	fontSize:           u16,
-	letterSpacing:      u16,
-	lineHeight:         u16,
-	wrapMode:           TextWrapMode,
-	textAlignment:      TextAlignment,
+	userData:      rawptr,
+	textColor:     Color,
+	fontId:        u16,
+	fontSize:      u16,
+	letterSpacing: u16,
+	lineHeight:    u16,
+	wrapMode:      TextWrapMode,
+	textAlignment: TextAlignment,
 }
 
 AspectRatioElementConfig :: struct {
-	aspectRatio:        f32,
+	aspectRatio: f32,
 }
 
 ImageElementConfig :: struct {
-	imageData:        rawptr,
+	imageData: rawptr,
 }
 
 CustomElementConfig :: struct {
@@ -126,10 +126,10 @@ CustomElementConfig :: struct {
 }
 
 BorderWidth :: struct {
-	left: u16,
-	right: u16,
-	top: u16,
-	bottom: u16,
+	left:            u16,
+	right:           u16,
+	top:             u16,
+	bottom:          u16,
 	betweenChildren: u16,
 }
 
@@ -191,51 +191,51 @@ FloatingElementConfig :: struct {
 
 TextRenderData :: struct {
 	stringContents: StringSlice,
-	textColor: Color,
-	fontId: u16,
-	fontSize: u16,
-	letterSpacing: u16,
-	lineHeight: u16,
+	textColor:      Color,
+	fontId:         u16,
+	fontSize:       u16,
+	letterSpacing:  u16,
+	lineHeight:     u16,
 }
 
 RectangleRenderData :: struct {
 	backgroundColor: Color,
-	cornerRadius: CornerRadius,
+	cornerRadius:    CornerRadius,
 }
 
 ImageRenderData :: struct {
 	backgroundColor: Color,
-	cornerRadius: CornerRadius,
-	imageData: rawptr,
+	cornerRadius:    CornerRadius,
+	imageData:       rawptr,
 }
 
 CustomRenderData :: struct {
 	backgroundColor: Color,
-	cornerRadius: CornerRadius,
-	customData: rawptr,
+	cornerRadius:    CornerRadius,
+	customData:      rawptr,
 }
 
 BorderRenderData :: struct {
-	color: Color,
+	color:        Color,
 	cornerRadius: CornerRadius,
-	width: BorderWidth,
+	width:        BorderWidth,
 }
 
 RenderCommandData :: struct #raw_union {
 	rectangle: RectangleRenderData,
-	text: TextRenderData,
-	image: ImageRenderData,
-	custom: CustomRenderData,
-	border: BorderRenderData,
+	text:      TextRenderData,
+	image:     ImageRenderData,
+	custom:    CustomRenderData,
+	border:    BorderRenderData,
 }
 
 RenderCommand :: struct {
-	boundingBox:        BoundingBox,
-	renderData:         RenderCommandData,
-	userData:           rawptr,
-	id:                 u32,
-	zIndex:             i16,
-	commandType:        RenderCommandType,
+	boundingBox: BoundingBox,
+	renderData:  RenderCommandData,
+	userData:    rawptr,
+	id:          u32,
+	zIndex:      i16,
+	commandType: RenderCommandType,
 }
 
 ScrollContainerData :: struct {
@@ -295,9 +295,9 @@ Sizing :: struct {
 }
 
 Padding :: struct {
-	left: u16,
-	right: u16,
-	top: u16,
+	left:   u16,
+	right:  u16,
+	top:    u16,
 	bottom: u16,
 }
 
@@ -364,11 +364,11 @@ ErrorType :: enum EnumBackingType {
 ErrorData :: struct {
 	errorType: ErrorType,
 	errorText: String,
-	userData: rawptr,
+	userData:  rawptr,
 }
 
 ErrorHandler :: struct {
-	handler: proc "c" (errorData: ErrorData),
+	handler:  proc "c" (errorData: ErrorData),
 	userData: rawptr,
 }
 
@@ -426,18 +426,21 @@ ConfigureOpenElement :: proc(config: ElementDeclaration) -> bool {
 }
 
 @(deferred_none = _CloseElement)
-UI_WithId :: proc(id: ElementId) -> proc (config: ElementDeclaration) -> bool {
+UI_WithId :: proc(id: ElementId) -> proc(config: ElementDeclaration) -> bool {
 	_OpenElementWithId(id)
 	return ConfigureOpenElement
 }
 
 @(deferred_none = _CloseElement)
-UI_AutoId :: proc() -> proc (config: ElementDeclaration) -> bool {
+UI_AutoId :: proc() -> proc(config: ElementDeclaration) -> bool {
 	_OpenElement()
 	return ConfigureOpenElement
 }
 
-UI :: proc{UI_WithId, UI_AutoId}
+UI :: proc {
+	UI_WithId,
+	UI_AutoId,
+}
 
 Text :: proc($text: string, config: ^TextElementConfig) {
 	wrapped := MakeString(text)
@@ -454,7 +457,7 @@ TextConfig :: proc(config: TextElementConfig) -> ^TextElementConfig {
 }
 
 PaddingAll :: proc(allPadding: u16) -> Padding {
-	return { left = allPadding, right = allPadding, top = allPadding, bottom = allPadding }
+	return {left = allPadding, right = allPadding, top = allPadding, bottom = allPadding}
 }
 
 BorderOutside :: proc(width: u16) -> BorderWidth {
