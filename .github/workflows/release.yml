@@ -195,8 +195,7 @@ jobs:
 
       - name: Generate Formula
         run: |
-          mkdir -p Formula
-          cat > Formula/harbor.rb << 'FORMULA_EOF'
+          cat > harbor.rb << 'FORMULA_EOF'
           class Harbor < Formula
             desc "GUI application for Docker"
             homepage "https://github.com/${{ github.repository }}"
@@ -233,15 +232,15 @@ jobs:
         run: |
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${{ env.HOMEBREW_TAP }}.git" tap
 
-          mkdir -p tap/Casks tap/Formula
+          mkdir -p tap/Casks
           cp Casks/harbor.rb tap/Casks/
-          cp Formula/harbor.rb tap/Formula/
+          cp harbor.rb tap/
 
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add Casks/harbor.rb Formula/harbor.rb
+          git add Casks/harbor.rb harbor.rb
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
