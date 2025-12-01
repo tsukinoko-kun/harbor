@@ -23,3 +23,8 @@ Since Linux does not support Casks, you can only run Harbor using its command.
 ## License
 
 Zlib
+
+Libraries used:
+
+- [Clay](https://www.nicbarker.com/clay)
+- [Raylib](https://www.raylib.com/)
