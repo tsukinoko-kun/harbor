@@ -112,6 +112,22 @@ log_text_bounds: clay.BoundingBox
 @(private)
 mono_char_width: f32 = 0
 
+// Dirty state tracking for performance optimization
+@(private)
+needs_redraw: bool = true
+
+@(private)
+last_mouse_pos: rl.Vector2
+
+@(private)
+last_window_width: i32 = 0
+
+@(private)
+last_window_height: i32 = 0
+
+@(private)
+last_window_focused: bool = true
+
 // Label key for Docker Compose project
 COMPOSE_PROJECT_LABEL :: "com.docker.compose.project"
 
@@ -164,7 +180,7 @@ init :: proc() {
 	// Initialize Raylib window
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT})
 	rl.InitWindow(1024, 768, "Harbor - Docker Manager")
-	rl.SetTargetFPS(60)
+	// Note: We don't use SetTargetFPS - we control frame timing via dirty state
 
 	// Initialize Clay
 	min_memory := clay.MinMemorySize()
@@ -226,6 +242,80 @@ shutdown :: proc() {
 	delete(raylib_fonts)
 	delete(clay_memory)
 	rl.CloseWindow()
+}
+
+// Mark the UI as needing a redraw
+mark_dirty :: proc() {
+	needs_redraw = true
+}
+
+// Check if the UI needs to be redrawn
+is_dirty :: proc() -> bool {
+	return needs_redraw
+}
+
+// Clear the dirty flag after rendering
+clear_dirty :: proc() {
+	needs_redraw = false
+}
+
+// Check for input events and window changes that require a redraw
+// Call this every iteration of the main loop
+check_events :: proc() {
+	// Check for window resize
+	current_width := rl.GetScreenWidth()
+	current_height := rl.GetScreenHeight()
+	if current_width != last_window_width || current_height != last_window_height {
+		last_window_width = current_width
+		last_window_height = current_height
+		needs_redraw = true
+	}
+
+	// Check for window focus change
+	current_focused := rl.IsWindowFocused()
+	if current_focused != last_window_focused {
+		last_window_focused = current_focused
+		needs_redraw = true
+	}
+
+	// Check for mouse movement (with threshold to avoid micro-movements)
+	current_mouse := rl.GetMousePosition()
+	mouse_delta_x := current_mouse.x - last_mouse_pos.x
+	mouse_delta_y := current_mouse.y - last_mouse_pos.y
+	if mouse_delta_x * mouse_delta_x + mouse_delta_y * mouse_delta_y > 1.0 {
+		last_mouse_pos = current_mouse
+		needs_redraw = true
+	}
+
+	// Check for mouse button events
+	if rl.IsMouseButtonPressed(.LEFT) ||
+	   rl.IsMouseButtonPressed(.RIGHT) ||
+	   rl.IsMouseButtonPressed(.MIDDLE) ||
+	   rl.IsMouseButtonReleased(.LEFT) ||
+	   rl.IsMouseButtonReleased(.RIGHT) ||
+	   rl.IsMouseButtonReleased(.MIDDLE) {
+		needs_redraw = true
+	}
+
+	// Check for mouse wheel scroll
+	scroll := rl.GetMouseWheelMoveV()
+	if scroll.x != 0 || scroll.y != 0 {
+		needs_redraw = true
+	}
+
+	// Check for any key press (using GetKeyPressed which returns 0 if no key)
+	if rl.GetKeyPressed() != .KEY_NULL {
+		needs_redraw = true
+	}
+
+	// Check for specific modifier keys that GetKeyPressed might miss
+	if rl.IsKeyPressed(.ESCAPE) ||
+	   rl.IsKeyPressed(.LEFT_CONTROL) ||
+	   rl.IsKeyPressed(.RIGHT_CONTROL) ||
+	   rl.IsKeyPressed(.LEFT_SUPER) ||
+	   rl.IsKeyPressed(.RIGHT_SUPER) {
+		needs_redraw = true
+	}
 }
 
 update :: proc() {

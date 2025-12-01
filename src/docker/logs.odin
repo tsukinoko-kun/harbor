@@ -32,9 +32,22 @@ LogBuffer :: struct {
 // Global log stream state
 log_stream: LogStreamState
 
+// Flag to track if log content has changed since last check
+@(private)
+log_content_changed: bool = false
+
 // Check if log stream is active
 is_log_stream_active :: proc() -> bool {
 	return log_stream.running
+}
+
+// Check if log content has changed since last check (clears flag after checking)
+has_log_content_changed :: proc() -> bool {
+	if log_content_changed {
+		log_content_changed = false
+		return true
+	}
+	return false
 }
 
 // Get the current container name being logged
@@ -365,6 +378,9 @@ append_to_log_buffer :: proc(data: []u8) {
 			buf.length += 1
 		}
 	}
+
+	// Mark that log content has changed for UI refresh
+	log_content_changed = true
 }
 
 // Build HTTP request for streaming (no Connection: close)
