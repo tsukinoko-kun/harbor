@@ -22,16 +22,19 @@ jobs:
             odin-target: linux_amd64
             binary: harbor
             archive: harbor-linux-amd64.tar.gz
+            subsystem: ""
           - os: macos-26
             target: macos-arm64
             odin-target: darwin_arm64
             binary: harbor
             archive: harbor-macos-arm64.tar.gz
+            subsystem: ""
           - os: windows-latest
             target: windows-amd64
             odin-target: windows_amd64
             binary: harbor.exe
             archive: harbor-windows-amd64.zip
+            subsystem: "-subsystem:windows"
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.target }})
@@ -53,7 +56,7 @@ jobs:
 
       - name: Build
         run: |
-          odin build src -out:${{ matrix.binary }} -target:${{ matrix.odin-target }} -o:speed
+          odin build src -out:${{ matrix.binary }} -target:${{ matrix.odin-target }} -o:speed ${{ matrix.subsystem }}
 
       - name: Create macOS app bundle
         if: startsWith(matrix.os, 'macos')
