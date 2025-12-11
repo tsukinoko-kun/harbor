@@ -52,7 +52,7 @@ func NewApp(dockerClient *docker.Client) *App {
 	}
 
 	a.sidebar = NewSidebar(theme, a.onViewChange)
-	a.containers = NewContainersView(theme)
+	a.containers = NewContainersView(theme, dockerClient)
 	a.images = NewImagesView(theme)
 	a.volumes = NewVolumesView(theme)
 	a.networks = NewNetworksView(theme)

@@ -103,3 +103,75 @@ func (c *Client) ListContainersGrouped(ctx context.Context) ([]ContainerGroup, e
 
 	return result, nil
 }
+
+// StartContainer starts a container by ID.
+func (c *Client) StartContainer(ctx context.Context, containerID string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cli.ContainerStart(ctx, containerID, container.StartOptions{})
+}
+
+// StopContainer stops a container by ID.
+func (c *Client) StopContainer(ctx context.Context, containerID string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cli.ContainerStop(ctx, containerID, container.StopOptions{})
+}
+
+// RemoveContainer removes a container by ID.
+func (c *Client) RemoveContainer(ctx context.Context, containerID string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+}
+
+// StartProject starts all containers in a project.
+func (c *Client) StartProject(ctx context.Context, projectName string) error {
+	containers, err := c.ListContainers(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, ctr := range containers {
+		if ctr.Project == projectName {
+			if err := c.StartContainer(ctx, ctr.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// StopProject stops all containers in a project.
+func (c *Client) StopProject(ctx context.Context, projectName string) error {
+	containers, err := c.ListContainers(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, ctr := range containers {
+		if ctr.Project == projectName {
+			if err := c.StopContainer(ctx, ctr.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// RemoveProject removes all containers in a project.
+func (c *Client) RemoveProject(ctx context.Context, projectName string) error {
+	containers, err := c.ListContainers(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, ctr := range containers {
+		if ctr.Project == projectName {
+			if err := c.RemoveContainer(ctx, ctr.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

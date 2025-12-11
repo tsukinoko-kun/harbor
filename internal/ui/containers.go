@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"context"
 	"image"
+	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -15,20 +17,59 @@ import (
 	"github.com/tsukinoko-kun/harbor/internal/ui/widgets"
 )
 
+// containerRowButtons holds the button states for a container row.
+type containerRowButtons struct {
+	delete     widget.Clickable
+	toggle     widget.Clickable
+	terminal   widget.Clickable
+	processing bool // true when an action is in progress
+}
+
+// projectRowButtons holds the button states for a project row.
+type projectRowButtons struct {
+	delete     widget.Clickable
+	toggle     widget.Clickable
+	processing bool // true when an action is in progress
+}
+
 // ContainersView displays the list of containers grouped by project.
 type ContainersView struct {
-	theme *Theme
-	list  widget.List
+	theme            *Theme
+	docker           *docker.Client
+	list             widget.List
+	containerButtons map[string]*containerRowButtons
+	projectButtons   map[string]*projectRowButtons
 }
 
 // NewContainersView creates a new containers view.
-func NewContainersView(theme *Theme) *ContainersView {
+func NewContainersView(theme *Theme, dockerClient *docker.Client) *ContainersView {
 	return &ContainersView{
-		theme: theme,
-		list: widget.List{
-			List: layout.List{Axis: layout.Vertical},
-		},
+		theme:            theme,
+		docker:           dockerClient,
+		list:             widget.List{List: layout.List{Axis: layout.Vertical}},
+		containerButtons: make(map[string]*containerRowButtons),
+		projectButtons:   make(map[string]*projectRowButtons),
 	}
+}
+
+// getContainerButtons returns or creates button state for a container.
+func (v *ContainersView) getContainerButtons(containerID string) *containerRowButtons {
+	if btns, ok := v.containerButtons[containerID]; ok {
+		return btns
+	}
+	btns := &containerRowButtons{}
+	v.containerButtons[containerID] = btns
+	return btns
+}
+
+// getProjectButtons returns or creates button state for a project.
+func (v *ContainersView) getProjectButtons(projectName string) *projectRowButtons {
+	if btns, ok := v.projectButtons[projectName]; ok {
+		return btns
+	}
+	btns := &projectRowButtons{}
+	v.projectButtons[projectName] = btns
+	return btns
 }
 
 // Layout renders the containers view.
@@ -40,18 +81,16 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 	// Flatten groups into items for the list
 	type listItem struct {
 		isHeader  bool
-		groupName string
+		group     docker.ContainerGroup
 		container docker.Container
 	}
 
 	var items []listItem
 	for _, group := range groups {
-		// Add group header
-		groupName := group.Name
-		if groupName == "" {
-			groupName = "Standalone"
+		// Add group header (only for non-standalone groups)
+		if group.Name != "" {
+			items = append(items, listItem{isHeader: true, group: group})
 		}
-		items = append(items, listItem{isHeader: true, groupName: groupName})
 
 		// Add containers
 		for _, c := range group.Containers {
@@ -73,7 +112,7 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 				return v.list.Layout(gtx, len(items), func(gtx layout.Context, index int) layout.Dimensions {
 					item := items[index]
 					if item.isHeader {
-						return v.layoutGroupHeader(gtx, item.groupName)
+						return v.layoutGroupHeader(gtx, item.group)
 					}
 					return v.layoutContainer(gtx, item.container)
 				})
@@ -106,7 +145,42 @@ func (v *ContainersView) layoutHeader(gtx layout.Context, count int) layout.Dime
 	})
 }
 
-func (v *ContainersView) layoutGroupHeader(gtx layout.Context, name string) layout.Dimensions {
+func (v *ContainersView) layoutGroupHeader(gtx layout.Context, group docker.ContainerGroup) layout.Dimensions {
+	btns := v.getProjectButtons(group.Name)
+
+	// Handle button clicks (only if not processing)
+	if !btns.processing {
+		if btns.toggle.Clicked(gtx) {
+			btns.processing = true
+			projectName := group.Name
+			if isGroupRunning(group) {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					_ = v.docker.StopProject(ctx, projectName)
+					btns.processing = false
+				}()
+			} else {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					_ = v.docker.StartProject(ctx, projectName)
+					btns.processing = false
+				}()
+			}
+		}
+		if btns.delete.Clicked(gtx) {
+			btns.processing = true
+			projectName := group.Name
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = v.docker.RemoveProject(ctx, projectName)
+				btns.processing = false
+			}()
+		}
+	}
+
 	return layout.Inset{
 		Top:    unit.Dp(16),
 		Bottom: unit.Dp(8),
@@ -129,20 +203,82 @@ func (v *ContainersView) layoutGroupHeader(gtx layout.Context, name string) layo
 					Left:   unit.Dp(12),
 					Right:  unit.Dp(12),
 				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					label := material.Body2(v.theme.Material, name)
-					label.Color = v.theme.Colors.TextSecondary
-					return label.Layout(gtx)
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						// Project name
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							label := material.Body2(v.theme.Material, group.Name)
+							label.Color = v.theme.Colors.TextSecondary
+							return label.Layout(gtx)
+						}),
+						// Start/Stop button
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return v.layoutButton(gtx, &btns.toggle, v.toggleLabel(isGroupRunning(group)), false, btns.processing)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						// Delete button
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return v.layoutButton(gtx, &btns.delete, "Delete", true, btns.processing)
+						}),
+					)
 				})
 			}),
 		)
 	})
 }
 
+// isGroupRunning returns true if any container in the group is running.
+func isGroupRunning(group docker.ContainerGroup) bool {
+	for _, c := range group.Containers {
+		if c.State == "running" {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container) layout.Dimensions {
+	btns := v.getContainerButtons(c.ID)
+	isRunning := c.State == "running"
+
+	// Handle button clicks (only if not processing)
+	if !btns.processing {
+		if btns.toggle.Clicked(gtx) {
+			btns.processing = true
+			containerID := c.ID
+			if isRunning {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					_ = v.docker.StopContainer(ctx, containerID)
+					btns.processing = false
+				}()
+			} else {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					_ = v.docker.StartContainer(ctx, containerID)
+					btns.processing = false
+				}()
+			}
+		}
+		if btns.delete.Clicked(gtx) {
+			btns.processing = true
+			containerID := c.ID
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = v.docker.RemoveContainer(ctx, containerID)
+				btns.processing = false
+			}()
+		}
+	}
+	// Terminal button click is not implemented yet
+
 	return layout.Inset{
 		Top:    unit.Dp(4),
 		Bottom: unit.Dp(4),
 		Left:   unit.Dp(12),
+		Right:  unit.Dp(12),
 	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			// Status indicator
@@ -180,8 +316,100 @@ func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container)
 					}),
 				)
 			}),
+			// Buttons (right-aligned): Terminal, Start/Stop, Delete
+			// Terminal button (only shown when running)
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !isRunning {
+					return layout.Dimensions{}
+				}
+				return v.layoutButton(gtx, &btns.terminal, "Terminal", false, btns.processing)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !isRunning {
+					return layout.Dimensions{}
+				}
+				return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+			}),
+			// Start/Stop button
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return v.layoutButton(gtx, &btns.toggle, v.toggleLabel(isRunning), false, btns.processing)
+			}),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			// Delete button
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return v.layoutButton(gtx, &btns.delete, "Delete", true, btns.processing)
+			}),
 		)
 	})
+}
+
+// toggleLabel returns the appropriate label for a start/stop button.
+func (v *ContainersView) toggleLabel(isRunning bool) string {
+	if isRunning {
+		return "Stop"
+	}
+	return "Start"
+}
+
+// layoutButton renders a small action button.
+func (v *ContainersView) layoutButton(gtx layout.Context, clickable *widget.Clickable, label string, isDanger bool, disabled bool) layout.Dimensions {
+	// When disabled, don't process clicks
+	if disabled {
+		return v.layoutButtonContent(gtx, label, isDanger, disabled, false)
+	}
+
+	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return v.layoutButtonContent(gtx, label, isDanger, disabled, clickable.Hovered())
+	})
+}
+
+// layoutButtonContent renders the button content with appropriate styling.
+func (v *ContainersView) layoutButtonContent(gtx layout.Context, label string, isDanger bool, disabled bool, hovered bool) layout.Dimensions {
+	// Determine colors
+	bgColor := v.theme.Colors.ButtonBg
+	textColor := v.theme.Colors.Text
+
+	if disabled {
+		textColor = v.theme.Colors.TextMuted
+	} else if hovered {
+		if isDanger {
+			bgColor = v.theme.Colors.ButtonDangerHov
+		} else {
+			bgColor = v.theme.Colors.ButtonHover
+		}
+	} else if isDanger {
+		bgColor = v.theme.Colors.ButtonDanger
+	}
+
+	// Show "..." when disabled (processing)
+	displayLabel := label
+	if disabled {
+		displayLabel = label + "..."
+	}
+
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			rr := gtx.Dp(unit.Dp(4))
+			rect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Min},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top:    unit.Dp(4),
+				Bottom: unit.Dp(4),
+				Left:   unit.Dp(8),
+				Right:  unit.Dp(8),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Caption(v.theme.Material, displayLabel)
+				lbl.Color = textColor
+				return lbl.Layout(gtx)
+			})
+		}),
+	)
 }
 
 func (v *ContainersView) layoutEmpty(gtx layout.Context) layout.Dimensions {
