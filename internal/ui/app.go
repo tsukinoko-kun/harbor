@@ -13,15 +13,17 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 
+	"github.com/tsukinoko-kun/harbor/internal/config"
 	"github.com/tsukinoko-kun/harbor/internal/docker"
 	"github.com/tsukinoko-kun/harbor/internal/models"
 )
 
 // App represents the main application.
 type App struct {
-	window *app.Window
-	theme  *Theme
-	docker *docker.Client
+	window   *app.Window
+	theme    *Theme
+	docker   *docker.Client
+	settings *config.Settings
 
 	// UI State
 	currentView models.View
@@ -30,6 +32,7 @@ type App struct {
 	images      *ImagesView
 	volumes     *VolumesView
 	networks    *NetworksView
+	settingsUI  *SettingsView
 
 	// Data
 	mu              sync.RWMutex
@@ -41,21 +44,23 @@ type App struct {
 }
 
 // NewApp creates a new application instance.
-func NewApp(dockerClient *docker.Client) *App {
+func NewApp(dockerClient *docker.Client, settings *config.Settings) *App {
 	theme := NewTheme()
 
 	a := &App{
 		window:      nil, // Set during Run
 		theme:       theme,
 		docker:      dockerClient,
+		settings:    settings,
 		currentView: models.ViewContainers,
 	}
 
 	a.sidebar = NewSidebar(theme, a.onViewChange)
-	a.containers = NewContainersView(theme, dockerClient)
+	a.containers = NewContainersView(theme, dockerClient, settings)
 	a.images = NewImagesView(theme)
 	a.volumes = NewVolumesView(theme)
 	a.networks = NewNetworksView(theme)
+	a.settingsUI = NewSettingsView(theme, settings)
 
 	return a
 }
@@ -197,6 +202,8 @@ func (a *App) layoutContent(gtx layout.Context) layout.Dimensions {
 		return a.volumes.Layout(gtx, a.volumeList)
 	case models.ViewNetworks:
 		return a.networks.Layout(gtx, a.networkList)
+	case models.ViewSettings:
+		return a.settingsUI.Layout(gtx)
 	default:
 		return layout.Dimensions{}
 	}

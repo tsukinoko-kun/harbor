@@ -8,6 +8,7 @@ const (
 	ViewImages
 	ViewVolumes
 	ViewNetworks
+	ViewSettings
 )
 
 // String returns the display name of the view.
@@ -21,6 +22,8 @@ func (v View) String() string {
 		return "Volumes"
 	case ViewNetworks:
 		return "Networks"
+	case ViewSettings:
+		return "Settings"
 	default:
 		return "Unknown"
 	}

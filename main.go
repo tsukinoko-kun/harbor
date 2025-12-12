@@ -6,11 +6,19 @@ import (
 
 	"gioui.org/app"
 
+	"github.com/tsukinoko-kun/harbor/internal/config"
 	"github.com/tsukinoko-kun/harbor/internal/docker"
 	"github.com/tsukinoko-kun/harbor/internal/ui"
 )
 
 func main() {
+	// Load configuration
+	settings, err := config.Load()
+	if err != nil {
+		log.Printf("Failed to load config: %v", err)
+		os.Exit(1)
+	}
+
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
 	if err != nil {
@@ -23,7 +31,7 @@ func main() {
 	go func() {
 		defer dockerClient.Close()
 
-		application := ui.NewApp(dockerClient)
+		application := ui.NewApp(dockerClient, settings)
 		if err := application.Run(); err != nil {
 			log.Printf("Application error: %v", err)
 			os.Exit(1)

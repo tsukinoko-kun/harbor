@@ -13,6 +13,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
+	"github.com/tsukinoko-kun/harbor/internal/config"
 	"github.com/tsukinoko-kun/harbor/internal/docker"
 	"github.com/tsukinoko-kun/harbor/internal/models"
 	"github.com/tsukinoko-kun/harbor/internal/ui/widgets"
@@ -37,6 +38,7 @@ type projectRowButtons struct {
 type ContainersView struct {
 	theme            *Theme
 	docker           *docker.Client
+	settings         *config.Settings
 	list             widget.List
 	containerButtons map[string]*containerRowButtons
 	projectButtons   map[string]*projectRowButtons
@@ -48,10 +50,11 @@ type ContainersView struct {
 }
 
 // NewContainersView creates a new containers view.
-func NewContainersView(theme *Theme, dockerClient *docker.Client) *ContainersView {
+func NewContainersView(theme *Theme, dockerClient *docker.Client, settings *config.Settings) *ContainersView {
 	return &ContainersView{
 		theme:            theme,
 		docker:           dockerClient,
+		settings:         settings,
 		list:             widget.List{List: layout.List{Axis: layout.Vertical}},
 		containerButtons: make(map[string]*containerRowButtons),
 		projectButtons:   make(map[string]*projectRowButtons),
@@ -360,10 +363,11 @@ func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container)
 		if btns.terminal.Clicked(gtx) {
 			btns.processing = true
 			containerID := c.ID
+			terminal := v.settings.GetSelectedTerminal()
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				if err := v.docker.OpenTerminal(ctx, containerID); err != nil {
+				if err := v.docker.OpenTerminal(ctx, containerID, terminal); err != nil {
 					v.setError("Terminal error: " + err.Error())
 				}
 				btns.processing = false

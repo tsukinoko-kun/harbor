@@ -24,7 +24,10 @@ type Colors struct {
 	StatusPaused    color.NRGBA
 	StatusCreated   color.NRGBA
 	Accent          color.NRGBA
+	Primary         color.NRGBA
 	GroupHeader     color.NRGBA
+	CardBg          color.NRGBA
+	SelectedBg      color.NRGBA
 	ButtonBg        color.NRGBA
 	ButtonHover     color.NRGBA
 	ButtonDanger    color.NRGBA
@@ -50,7 +53,10 @@ func DefaultColors() Colors {
 		StatusPaused:    rgb(0xfbbf24), // Yellow
 		StatusCreated:   rgb(0x9ca3af), // Gray
 		Accent:          rgb(0x60a5fa), // Blue
+		Primary:         rgb(0x60a5fa), // Blue (same as accent)
 		GroupHeader:     rgb(0x2a2a2a),
+		CardBg:          rgb(0x2a2a2a),
+		SelectedBg:      rgb(0x1e3a5f), // Dark blue for selection
 		ButtonBg:        rgb(0x3d3d3d),
 		ButtonHover:     rgb(0x4d4d4d),
 		ButtonDanger:    rgb(0xdc2626), // Red

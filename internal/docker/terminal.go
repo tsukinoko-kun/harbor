@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/tsukinoko-kun/harbor/internal/config"
 )
 
 // linuxShells are the shells to try for Linux containers, in order of preference.
@@ -92,8 +93,12 @@ func (c *Client) GetContainerShell(ctx context.Context, containerID string) (str
 }
 
 // OpenTerminal opens a terminal window with a shell session in the specified container.
-// It uses the system's default terminal application.
-func (c *Client) OpenTerminal(ctx context.Context, containerID string) error {
+// It uses the terminal specified in settings.
+func (c *Client) OpenTerminal(ctx context.Context, containerID string, terminal *config.Terminal) error {
+	if terminal == nil {
+		return fmt.Errorf("no terminal configured")
+	}
+
 	shell, err := c.GetContainerShell(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("failed to detect shell: %w", err)
@@ -101,36 +106,7 @@ func (c *Client) OpenTerminal(ctx context.Context, containerID string) error {
 
 	dockerExecCmd := fmt.Sprintf("docker exec -it %s %s", containerID, shell)
 
-	var cmd *exec.Cmd
-	var useRun bool // whether to use Run() instead of Start()
-
-	switch runtime.GOOS {
-	case "darwin":
-		// macOS: Use osascript to open Terminal.app
-		// Escape backslashes and quotes for AppleScript string
-		escapedCmd := escapeAppleScript(dockerExecCmd)
-		script := fmt.Sprintf(`
-			tell application "Terminal"
-				activate
-				do script "%s"
-			end tell
-		`, escapedCmd)
-		cmd = exec.CommandContext(ctx, "osascript", "-e", script)
-		useRun = true // osascript is quick, wait for it to complete
-
-	case "linux":
-		// Linux: Try x-terminal-emulator (Debian/Ubuntu default)
-		cmd = exec.CommandContext(ctx, "x-terminal-emulator", "-e", dockerExecCmd)
-		useRun = false // terminal emulator stays open
-
-	case "windows":
-		// Windows: Use cmd to start a new terminal window
-		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", "cmd", "/k", dockerExecCmd)
-		useRun = false // starts a separate process
-
-	default:
-		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
-	}
+	cmd, useRun := buildTerminalCommand(ctx, terminal, dockerExecCmd)
 
 	if useRun {
 		// Run and wait for completion to catch errors
@@ -149,6 +125,69 @@ func (c *Client) OpenTerminal(ctx context.Context, containerID string) error {
 	}
 
 	return nil
+}
+
+// buildTerminalCommand creates the appropriate command for the given terminal.
+// Returns the command and whether to use Run() instead of Start().
+func buildTerminalCommand(ctx context.Context, terminal *config.Terminal, dockerCmd string) (*exec.Cmd, bool) {
+	switch terminal.Name {
+	case "ghostty":
+		// On macOS, Ghostty CLI launching is not supported, use 'open' instead
+		if runtime.GOOS == "darwin" {
+			return exec.CommandContext(ctx, "open", "-na", "Ghostty", "--args", "-e", "sh", "-c", dockerCmd), true
+		}
+		return exec.CommandContext(ctx, terminal.Path, "-e", "sh", "-c", dockerCmd), false
+
+	case "kitty":
+		// On macOS, kitty also needs special handling
+		if runtime.GOOS == "darwin" {
+			return exec.CommandContext(ctx, "open", "-na", "kitty", "--args", "-e", "sh", "-c", dockerCmd), true
+		}
+		return exec.CommandContext(ctx, terminal.Path, "-e", "sh", "-c", dockerCmd), false
+
+	case "alacritty":
+		// On macOS, use 'open' for Alacritty as well
+		if runtime.GOOS == "darwin" {
+			return exec.CommandContext(ctx, "open", "-na", "Alacritty", "--args", "-e", "sh", "-c", dockerCmd), true
+		}
+		return exec.CommandContext(ctx, terminal.Path, "-e", "sh", "-c", dockerCmd), false
+
+	case "wezterm":
+		// On macOS, use 'open' for WezTerm
+		if runtime.GOOS == "darwin" {
+			return exec.CommandContext(ctx, "open", "-na", "WezTerm", "--args", "start", "--", "sh", "-c", dockerCmd), true
+		}
+		return exec.CommandContext(ctx, terminal.Path, "start", "--", "sh", "-c", dockerCmd), false
+
+	case "konsole", "xfce4-terminal":
+		return exec.CommandContext(ctx, terminal.Path, "-e", "sh", "-c", dockerCmd), false
+
+	case "gnome-terminal":
+		return exec.CommandContext(ctx, terminal.Path, "--", "sh", "-c", dockerCmd), false
+
+	case "Terminal.app":
+		// macOS: Use osascript to open Terminal.app
+		escapedCmd := escapeAppleScript(dockerCmd)
+		script := fmt.Sprintf(`
+			tell application "Terminal"
+				activate
+				do script "%s"
+			end tell
+		`, escapedCmd)
+		return exec.CommandContext(ctx, "osascript", "-e", script), true
+
+	case "wt":
+		// Windows Terminal
+		return exec.CommandContext(ctx, terminal.Path, "cmd", "/k", dockerCmd), false
+
+	case "cmd":
+		// Windows CMD
+		return exec.CommandContext(ctx, terminal.Path, "/c", "start", "cmd", "/k", dockerCmd), false
+
+	default:
+		// Fallback: try -e flag which is common
+		return exec.CommandContext(ctx, terminal.Path, "-e", "sh", "-c", dockerCmd), false
+	}
 }
 
 // escapeAppleScript escapes a string for use in AppleScript.

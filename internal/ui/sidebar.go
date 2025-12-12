@@ -15,10 +15,11 @@ import (
 
 // Sidebar represents the navigation sidebar.
 type Sidebar struct {
-	theme    *Theme
-	onSelect func(models.View)
-	items    []sidebarItem
-	list     widget.List
+	theme        *Theme
+	onSelect     func(models.View)
+	items        []sidebarItem
+	settingsItem sidebarItem
+	list         widget.List
 }
 
 type sidebarItem struct {
@@ -38,6 +39,7 @@ func NewSidebar(theme *Theme, onSelect func(models.View)) *Sidebar {
 			{view: models.ViewVolumes, label: "Volumes"},
 			{view: models.ViewNetworks, label: "Networks"},
 		},
+		settingsItem: sidebarItem{view: models.ViewSettings, label: "Settings"},
 		list: widget.List{
 			List: layout.List{Axis: layout.Vertical},
 		},
@@ -46,11 +48,15 @@ func NewSidebar(theme *Theme, onSelect func(models.View)) *Sidebar {
 
 // Layout renders the sidebar.
 func (s *Sidebar) Layout(gtx layout.Context, currentView models.View) layout.Dimensions {
-	// Check for clicks
+	// Check for clicks on main items
 	for i := range s.items {
 		if s.items[i].clickable.Clicked(gtx) {
 			s.onSelect(s.items[i].view)
 		}
+	}
+	// Check for click on settings
+	if s.settingsItem.clickable.Clicked(gtx) {
+		s.onSelect(s.settingsItem.view)
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -61,6 +67,18 @@ func (s *Sidebar) Layout(gtx layout.Context, currentView models.View) layout.Dim
 		// Navigation items
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return s.layoutItems(gtx, currentView)
+		}),
+		// Settings at the bottom
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Left:   unit.Dp(8),
+				Right:  unit.Dp(8),
+				Bottom: unit.Dp(16),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				isActive := s.settingsItem.view == currentView
+				isHovered := s.settingsItem.clickable.Hovered()
+				return s.layoutItem(gtx, &s.settingsItem, isActive, isHovered)
+			})
 		}),
 	)
 }
