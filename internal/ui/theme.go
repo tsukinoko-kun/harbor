@@ -29,6 +29,8 @@ type Colors struct {
 	ButtonHover     color.NRGBA
 	ButtonDanger    color.NRGBA
 	ButtonDangerHov color.NRGBA
+	ErrorBg         color.NRGBA
+	ErrorText       color.NRGBA
 }
 
 // DefaultColors returns the default dark color palette.
@@ -53,6 +55,8 @@ func DefaultColors() Colors {
 		ButtonHover:     rgb(0x4d4d4d),
 		ButtonDanger:    rgb(0xdc2626), // Red
 		ButtonDangerHov: rgb(0xef4444), // Lighter red
+		ErrorBg:         rgb(0x7f1d1d), // Dark red background
+		ErrorText:       rgb(0xfecaca), // Light red text
 	}
 }
 

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"image"
+	"sync"
 	"time"
 
 	"gioui.org/layout"
@@ -39,6 +40,11 @@ type ContainersView struct {
 	list             widget.List
 	containerButtons map[string]*containerRowButtons
 	projectButtons   map[string]*projectRowButtons
+
+	// Error notification
+	errorMu      sync.RWMutex
+	errorMessage string
+	errorDismiss widget.Clickable
 }
 
 // NewContainersView creates a new containers view.
@@ -72,8 +78,34 @@ func (v *ContainersView) getProjectButtons(projectName string) *projectRowButton
 	return btns
 }
 
+// setError sets an error message to display.
+func (v *ContainersView) setError(msg string) {
+	v.errorMu.Lock()
+	defer v.errorMu.Unlock()
+	v.errorMessage = msg
+}
+
+// clearError clears the error message.
+func (v *ContainersView) clearError() {
+	v.errorMu.Lock()
+	defer v.errorMu.Unlock()
+	v.errorMessage = ""
+}
+
+// getError returns the current error message.
+func (v *ContainersView) getError() string {
+	v.errorMu.RLock()
+	defer v.errorMu.RUnlock()
+	return v.errorMessage
+}
+
 // Layout renders the containers view.
 func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGroup) layout.Dimensions {
+	// Handle error dismiss button click
+	if v.errorDismiss.Clicked(gtx) {
+		v.clearError()
+	}
+
 	if len(groups) == 0 {
 		return v.layoutEmpty(gtx)
 	}
@@ -99,6 +131,10 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// Error notification (if any)
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutError(gtx)
+		}),
 		// Header
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return v.layoutHeader(gtx, countContainers(groups))
@@ -119,6 +155,56 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 			})
 		}),
 	)
+}
+
+func (v *ContainersView) layoutError(gtx layout.Context) layout.Dimensions {
+	errMsg := v.getError()
+	if errMsg == "" {
+		return layout.Dimensions{}
+	}
+
+	return layout.Inset{
+		Top:   unit.Dp(8),
+		Left:  unit.Dp(16),
+		Right: unit.Dp(16),
+	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				rr := gtx.Dp(unit.Dp(6))
+				rect := clip.RRect{
+					Rect: image.Rectangle{Max: gtx.Constraints.Min},
+					NE:   rr, NW: rr, SE: rr, SW: rr,
+				}
+				paint.FillShape(gtx.Ops, v.theme.Colors.ErrorBg, rect.Op(gtx.Ops))
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{
+					Top:    unit.Dp(12),
+					Bottom: unit.Dp(12),
+					Left:   unit.Dp(16),
+					Right:  unit.Dp(16),
+				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						// Error message
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							label := material.Body2(v.theme.Material, errMsg)
+							label.Color = v.theme.Colors.ErrorText
+							return label.Layout(gtx)
+						}),
+						// Dismiss button
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return v.errorDismiss.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								label := material.Body2(v.theme.Material, "✕")
+								label.Color = v.theme.Colors.ErrorText
+								return label.Layout(gtx)
+							})
+						}),
+					)
+				})
+			}),
+		)
+	})
 }
 
 func (v *ContainersView) layoutHeader(gtx layout.Context, count int) layout.Dimensions {
@@ -271,8 +357,19 @@ func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container)
 				btns.processing = false
 			}()
 		}
+		if btns.terminal.Clicked(gtx) {
+			btns.processing = true
+			containerID := c.ID
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				if err := v.docker.OpenTerminal(ctx, containerID); err != nil {
+					v.setError("Terminal error: " + err.Error())
+				}
+				btns.processing = false
+			}()
+		}
 	}
-	// Terminal button click is not implemented yet
 
 	return layout.Inset{
 		Top:    unit.Dp(4),
