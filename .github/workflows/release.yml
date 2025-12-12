@@ -19,22 +19,22 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-amd64
-            odin-target: linux_amd64
+            goos: linux
+            goarch: amd64
             binary: harbor
             archive: harbor-linux-amd64.tar.gz
-            subsystem: ""
-          - os: macos-26
+          - os: macos-14
             target: macos-arm64
-            odin-target: darwin_arm64
+            goos: darwin
+            goarch: arm64
             binary: harbor
             archive: harbor-macos-arm64.tar.gz
-            subsystem: ""
           - os: windows-latest
             target: windows-amd64
-            odin-target: windows_amd64
+            goos: windows
+            goarch: amd64
             binary: harbor.exe
             archive: harbor-windows-amd64.zip
-            subsystem: "-subsystem:windows"
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.target }})
@@ -43,20 +43,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Odin
-        uses: laytan/setup-odin@v2
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          go-version-file: go.mod
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev libxcursor-dev libxfixes-dev libwayland-dev
 
       - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
         run: |
-          odin build src -out:${{ matrix.binary }} -target:${{ matrix.odin-target }} -o:speed ${{ matrix.subsystem }}
+          go build -ldflags="-s -w" -o ${{ matrix.binary }} .
 
       - name: Create macOS app bundle
         if: startsWith(matrix.os, 'macos')
@@ -79,7 +83,37 @@ jobs:
 
           # Copy files into bundle
           cp ${{ matrix.binary }} Harbor.app/Contents/MacOS/
-          cp assets/macos/Info.plist Harbor.app/Contents/
+
+          # Generate Info.plist
+          cat > Harbor.app/Contents/Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>harbor</string>
+            <key>CFBundleIconFile</key>
+            <string>Harbor.icns</string>
+            <key>CFBundleIdentifier</key>
+            <string>dev.frankreyner.harbor</string>
+            <key>CFBundleName</key>
+            <string>Harbor</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${GITHUB_REF_NAME#v}</string>
+            <key>CFBundleVersion</key>
+            <string>${GITHUB_REF_NAME#v}</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>NSSupportsAutomaticGraphicsSwitching</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
           cp Harbor.icns Harbor.app/Contents/Resources/
 
           # Clean up temporary files
