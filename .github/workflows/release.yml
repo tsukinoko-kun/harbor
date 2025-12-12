@@ -245,7 +245,7 @@ jobs:
         run: |
           echo "macos_arm64=$(sha256sum artifacts/macos-arm64/harbor-macos-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "macos_arm64_cli=$(sha256sum artifacts/macos-arm64-cli/harbor-macos-arm64-cli.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "linux_amd64=$(sha256sum artifacts/linux-amd64/harbor-linux-amd64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "linux_amd64=$(sha256sum artifacts/linux-amd64-appimage/harbor-linux-amd64.AppImage | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Extract version
         id: version
@@ -291,13 +291,17 @@ jobs:
 
             on_linux do
               on_intel do
-                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/harbor-linux-amd64.tar.gz"
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/harbor-linux-amd64.AppImage"
                 sha256 "${{ steps.sha.outputs.linux_amd64 }}"
               end
             end
 
             def install
-              bin.install "harbor"
+              if OS.linux?
+                bin.install "harbor-linux-amd64.AppImage" => "harbor"
+              else
+                bin.install "harbor"
+              end
             end
 
             test do
