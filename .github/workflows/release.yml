@@ -52,7 +52,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev libxcursor-dev libxfixes-dev libwayland-dev
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev libxcursor-dev libxfixes-dev libwayland-dev libfuse2
 
       - name: Build
         env:
@@ -127,6 +127,41 @@ jobs:
           # CLI binary for Formula
           tar -czvf harbor-macos-arm64-cli.tar.gz ${{ matrix.binary }}
 
+      - name: Create Linux AppImage
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # Download linuxdeploy
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/share/applications
+
+          # Copy binary
+          cp ${{ matrix.binary }} AppDir/usr/bin/
+
+          # Copy icon
+          cp icon.png AppDir/usr/share/icons/hicolor/256x256/apps/harbor.png
+
+          # Create .desktop file
+          cat > AppDir/usr/share/applications/harbor.desktop << EOF
+          [Desktop Entry]
+          Name=Harbor
+          Exec=harbor
+          Icon=harbor
+          Type=Application
+          Categories=Development;Utility;
+          Comment=GUI application for Docker
+          EOF
+
+          # Create AppImage
+          ARCH=x86_64 ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage --desktop-file AppDir/usr/share/applications/harbor.desktop --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/harbor.png
+
+          # Rename to consistent name
+          mv Harbor-x86_64.AppImage harbor-linux-amd64.AppImage
+
       - name: Create archive (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -153,6 +188,14 @@ jobs:
           path: harbor-macos-arm64-cli.tar.gz
           retention-days: 1
 
+      - name: Upload AppImage artifact (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-appimage
+          path: harbor-linux-amd64.AppImage
+          retention-days: 1
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -167,7 +210,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.AppImage" \) -exec mv {} release/ \;
 
       - name: Generate checksums
         working-directory: release
