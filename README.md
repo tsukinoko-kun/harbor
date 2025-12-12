@@ -26,5 +26,4 @@ Zlib
 
 Libraries used:
 
-- [Clay](https://www.nicbarker.com/clay)
-- [Raylib](https://www.raylib.com/)
+- [Gio](https://gioui.org/)
