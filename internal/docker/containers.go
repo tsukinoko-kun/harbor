@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"io"
 	"sort"
 	"strings"
 
@@ -174,4 +175,19 @@ func (c *Client) RemoveProject(ctx context.Context, projectName string) error {
 		}
 	}
 	return nil
+}
+
+// ContainerLogs returns a reader for streaming container logs.
+// The caller is responsible for closing the returned reader.
+func (c *Client) ContainerLogs(ctx context.Context, containerID string, follow bool) (io.ReadCloser, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     follow,
+		Tail:       "all",
+		Timestamps: false,
+	})
 }

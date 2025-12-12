@@ -24,6 +24,7 @@ type containerRowButtons struct {
 	delete     widget.Clickable
 	toggle     widget.Clickable
 	terminal   widget.Clickable
+	logs       widget.Clickable
 	processing bool // true when an action is in progress
 }
 
@@ -373,6 +374,11 @@ func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container)
 				btns.processing = false
 			}()
 		}
+		if btns.logs.Clicked(gtx) {
+			containerID := c.ID
+			containerName := c.Name
+			NewLogsWindow(v.theme, v.docker, containerID, containerName)
+		}
 	}
 
 	return layout.Inset{
@@ -417,7 +423,12 @@ func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container)
 					}),
 				)
 			}),
-			// Buttons (right-aligned): Terminal, Start/Stop, Delete
+			// Buttons (right-aligned): Logs, Terminal, Start/Stop, Delete
+			// Logs button (available for all containers)
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return v.layoutButton(gtx, &btns.logs, "Logs", false, false)
+			}),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			// Terminal button (only shown when running)
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if !isRunning {
