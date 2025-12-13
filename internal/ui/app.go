@@ -231,8 +231,12 @@ func (a *App) layoutStatusBar(gtx layout.Context) layout.Dimensions {
 	borderRect := clip.Rect{Max: image.Point{X: gtx.Constraints.Max.X, Y: gtx.Dp(unit.Dp(1))}}
 	paint.FillShape(gtx.Ops, a.theme.Colors.Border, borderRect.Op())
 
-	// Version text
-	versionText := version.Version + " (" + version.Commit + ")"
+	// Version text (show short commit hash in status bar)
+	commit := version.Commit
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	versionText := version.Version + " (" + commit + ")"
 
 	return layout.Inset{
 		Left:   unit.Dp(8),
