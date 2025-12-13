@@ -43,5 +43,3 @@ func buildTerminalCommand(ctx context.Context, terminal *config.Terminal, docker
 		return exec.CommandContext(ctx, "cmd", "/c", "start", "cmd", "/k", dockerCmd), false
 	}
 }
-
-

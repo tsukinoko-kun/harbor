@@ -74,5 +74,3 @@ func escapeAppleScript(s string) string {
 	}
 	return result
 }
-
-

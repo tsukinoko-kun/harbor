@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -153,6 +154,17 @@ func (a *App) onViewChange(view models.View) {
 }
 
 func (a *App) layout(gtx layout.Context) layout.Dimensions {
+	// Handle keyboard shortcuts
+	for {
+		event, ok := gtx.Event(key.Filter{Name: ",", Required: key.ModShortcut})
+		if !ok {
+			break
+		}
+		if e, ok := event.(key.Event); ok && e.State == key.Press {
+			a.onViewChange(models.ViewSettings)
+		}
+	}
+
 	// Fill background
 	paint.FillShape(gtx.Ops, a.theme.Colors.Background, clip.Rect{Max: gtx.Constraints.Max}.Op())
 

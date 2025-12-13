@@ -223,4 +223,3 @@ func detectWindowsTerminals() []Terminal {
 
 	return terminals
 }
-
