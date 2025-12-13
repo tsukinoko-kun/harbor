@@ -4,6 +4,7 @@ package docker
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,15 +111,28 @@ func getTerminalArgs(terminalName, dockerCmd string) []string {
 func buildTerminalCommand(ctx context.Context, terminal *config.Terminal, dockerCmd string) (*exec.Cmd, bool) {
 	args := getTerminalArgs(terminal.Name, dockerCmd)
 
+	fmt.Printf("[DEBUG] buildTerminalCommand: terminal.Name=%s, terminal.Path=%s\n", terminal.Name, terminal.Path)
+	fmt.Printf("[DEBUG] args: %v\n", args)
+
 	// Check if this is a Snap-installed terminal
 	if isSnap, snapName := isSnapPath(terminal.Path); isSnap {
+		fmt.Printf("[DEBUG] Detected snap: %s\n", snapName)
 		// Verify snap command exists
 		if _, err := exec.LookPath("snap"); err == nil {
 			// Also verify the snap is actually installed
 			if _, err := os.Stat("/snap/" + snapName); err == nil {
-				return buildSnapCommand(ctx, snapName, args...), false
+				cmd := buildSnapCommand(ctx, snapName, args...)
+				fmt.Printf("[DEBUG] Snap command: %s %v\n", cmd.Path, cmd.Args)
+				// Return true to use Run() and capture output for debugging
+				return cmd, true
+			} else {
+				fmt.Printf("[DEBUG] Snap dir not found: /snap/%s\n", snapName)
 			}
+		} else {
+			fmt.Printf("[DEBUG] snap command not found\n")
 		}
+	} else {
+		fmt.Printf("[DEBUG] Not a snap path\n")
 	}
 
 	// Regular non-snap terminal
