@@ -56,15 +56,14 @@ func isSnapPath(terminalPath string) (bool, string) {
 }
 
 // buildSnapCommand creates a command that runs through snap run.
-// Uses the pattern: setsid snap run <snap-name> -- <args...>
-// We use setsid to start in a new session, avoiding EGL/display conflicts
-// when launched from another GUI application.
+// Uses systemd-run to launch in a proper user session with full display access,
+// avoiding EGL/display context conflicts when launched from another GUI application.
 func buildSnapCommand(ctx context.Context, snapName string, args ...string) *exec.Cmd {
-	// Use setsid to create a new session, fully detaching from parent's
-	// display/EGL context which can cause "Failed to create EGL display" errors
-	cmdArgs := []string{"snap", "run", snapName, "--"}
+	// Use systemd-run --user --scope to run in a transient scope unit
+	// This gives the process proper access to the user's display session
+	cmdArgs := []string{"--user", "--scope", "snap", "run", snapName, "--"}
 	cmdArgs = append(cmdArgs, args...)
-	return exec.CommandContext(ctx, "setsid", cmdArgs...)
+	return exec.CommandContext(ctx, "systemd-run", cmdArgs...)
 }
 
 // getTerminalArgs returns the arguments for a given terminal to execute a docker command.
@@ -140,8 +139,7 @@ func buildTerminalCommand(ctx context.Context, terminal *config.Terminal, docker
 	}
 
 	// Regular non-snap terminal
-	// Use setsid to create a new session, avoiding EGL/display conflicts
-	// when launched from another GUI application
-	cmdArgs := append([]string{terminal.Path}, args...)
-	return exec.CommandContext(ctx, "setsid", cmdArgs...), false
+	// Use systemd-run to launch in a proper user session with full display access
+	cmdArgs := append([]string{"--user", "--scope", terminal.Path}, args...)
+	return exec.CommandContext(ctx, "systemd-run", cmdArgs...), false
 }
