@@ -23,18 +23,21 @@ jobs:
             goarch: amd64
             binary: harbor
             archive: harbor-linux-amd64.tar.gz
+            ldflags_extra: ""
           - os: macos-14
             target: macos-arm64
             goos: darwin
             goarch: arm64
             binary: harbor
             archive: harbor-macos-arm64.tar.gz
+            ldflags_extra: ""
           - os: windows-latest
             target: windows-amd64
             goos: windows
             goarch: amd64
             binary: harbor.exe
             archive: harbor-windows-amd64.zip
+            ldflags_extra: -H windowsgui
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.target }})
@@ -64,7 +67,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           COMMIT="$(git rev-parse HEAD)"
           COMMIT_DATE="$(git log -1 --format=%cI)"
-          go build -ldflags="-s -w -X 'github.com/tsukinoko-kun/harbor/internal/version.Version=${VERSION}' -X 'github.com/tsukinoko-kun/harbor/internal/version.Commit=${COMMIT}' -X 'github.com/tsukinoko-kun/harbor/internal/version.CommitDate=${COMMIT_DATE}'" -o ${{ matrix.binary }} .
+          LDFLAGS="-s -w -X 'github.com/tsukinoko-kun/harbor/internal/version.Version=${VERSION}' -X 'github.com/tsukinoko-kun/harbor/internal/version.Commit=${COMMIT}' -X 'github.com/tsukinoko-kun/harbor/internal/version.CommitDate=${COMMIT_DATE}' ${{ matrix.ldflags_extra }}"
+          go build -ldflags="${LDFLAGS}" -o ${{ matrix.binary }} .
 
       - name: Create macOS app bundle
         if: startsWith(matrix.os, 'macos')
