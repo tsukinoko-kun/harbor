@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/tsukinoko-kun/harbor/internal/config"
@@ -109,7 +110,11 @@ func (c *Client) OpenTerminal(ctx context.Context, containerID string, terminal 
 	if useRun {
 		// Run and wait for completion to catch errors
 		output, err := cmd.CombinedOutput()
+		if len(output) > 0 {
+			log.Printf("[DEBUG] Terminal output:\n%s", string(output))
+		}
 		if err != nil {
+			log.Printf("[DEBUG] Terminal error: %v", err)
 			if len(output) > 0 {
 				return fmt.Errorf("failed to open terminal: %w: %s", err, string(output))
 			}
@@ -118,6 +123,7 @@ func (c *Client) OpenTerminal(ctx context.Context, containerID string, terminal 
 	} else {
 		// Start the command (don't wait for it to complete)
 		if err := cmd.Start(); err != nil {
+			log.Printf("[DEBUG] Terminal start error: %v", err)
 			return fmt.Errorf("failed to open terminal: %w", err)
 		}
 	}
