@@ -11,6 +11,7 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/tsukinoko-kun/harbor/internal/config"
+	"github.com/tsukinoko-kun/harbor/internal/version"
 )
 
 // SettingsView displays the application settings.
@@ -82,8 +83,15 @@ func (v *SettingsView) layoutHeader(gtx layout.Context) layout.Dimensions {
 }
 
 func (v *SettingsView) layoutContent(gtx layout.Context) layout.Dimensions {
-	return v.list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-		return v.layoutTerminalSection(gtx)
+	return v.list.Layout(gtx, 2, func(gtx layout.Context, index int) layout.Dimensions {
+		switch index {
+		case 0:
+			return v.layoutTerminalSection(gtx)
+		case 1:
+			return v.layoutVersionSection(gtx)
+		default:
+			return layout.Dimensions{}
+		}
 	})
 }
 
@@ -232,3 +240,74 @@ func (v *SettingsView) layoutRadio(gtx layout.Context, isSelected bool) layout.D
 	return layout.Dimensions{Size: image.Point{X: size, Y: size}}
 }
 
+func (v *SettingsView) layoutVersionSection(gtx layout.Context) layout.Dimensions {
+	return layout.Inset{Top: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			// Section header
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.H6(v.theme.Material, "About")
+					label.Color = v.theme.Colors.Text
+					return label.Layout(gtx)
+				})
+			}),
+			// Version info card
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Stack{}.Layout(gtx,
+					layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+						rr := gtx.Dp(unit.Dp(6))
+						rect := clip.RRect{
+							Rect: image.Rectangle{Max: gtx.Constraints.Min},
+							NE:   rr, NW: rr, SE: rr, SW: rr,
+						}
+						paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, rect.Op(gtx.Ops))
+						return layout.Dimensions{Size: gtx.Constraints.Min}
+					}),
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{
+							Top:    unit.Dp(12),
+							Bottom: unit.Dp(12),
+							Left:   unit.Dp(16),
+							Right:  unit.Dp(16),
+						}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								// Version
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return v.layoutVersionRow(gtx, "Version", version.Version)
+								}),
+								// Commit
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return v.layoutVersionRow(gtx, "Commit", version.Commit)
+									})
+								}),
+								// Commit Date
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return v.layoutVersionRow(gtx, "Build Date", version.CommitDate)
+									})
+								}),
+							)
+						})
+					}),
+				)
+			}),
+		)
+	})
+}
+
+func (v *SettingsView) layoutVersionRow(gtx layout.Context, label, value string) layout.Dimensions {
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(v.theme.Material, label+":")
+			l.Color = v.theme.Colors.TextMuted
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body2(v.theme.Material, value)
+			l.Color = v.theme.Colors.Text
+			return l.Layout(gtx)
+		}),
+	)
+}

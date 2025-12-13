@@ -62,7 +62,8 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           COMMIT="$(git rev-parse --short HEAD)"
-          go build -ldflags="-s -w -X 'github.com/tsukinoko-kun/harbor/internal/version.Version=${VERSION}' -X 'github.com/tsukinoko-kun/harbor/internal/version.Commit=${COMMIT}'" -o ${{ matrix.binary }} .
+          COMMIT_DATE="$(git log -1 --format=%cI)"
+          go build -ldflags="-s -w -X 'github.com/tsukinoko-kun/harbor/internal/version.Version=${VERSION}' -X 'github.com/tsukinoko-kun/harbor/internal/version.Commit=${COMMIT}' -X 'github.com/tsukinoko-kun/harbor/internal/version.CommitDate=${COMMIT_DATE}'" -o ${{ matrix.binary }} .
 
       - name: Create macOS app bundle
         if: startsWith(matrix.os, 'macos')
