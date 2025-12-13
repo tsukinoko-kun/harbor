@@ -60,10 +60,6 @@ func (s *Sidebar) Layout(gtx layout.Context, currentView models.View) layout.Dim
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// Header
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return s.layoutHeader(gtx)
-		}),
 		// Navigation items
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return s.layoutItems(gtx, currentView)
@@ -83,21 +79,9 @@ func (s *Sidebar) Layout(gtx layout.Context, currentView models.View) layout.Dim
 	)
 }
 
-func (s *Sidebar) layoutHeader(gtx layout.Context) layout.Dimensions {
-	return layout.Inset{
-		Top:    unit.Dp(20),
-		Bottom: unit.Dp(20),
-		Left:   unit.Dp(16),
-		Right:  unit.Dp(16),
-	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		title := material.H6(s.theme.Material, "Harbor")
-		title.Color = s.theme.Colors.Text
-		return title.Layout(gtx)
-	})
-}
-
 func (s *Sidebar) layoutItems(gtx layout.Context, currentView models.View) layout.Dimensions {
 	return layout.Inset{
+		Top:   unit.Dp(16),
 		Left:  unit.Dp(8),
 		Right: unit.Dp(8),
 	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
