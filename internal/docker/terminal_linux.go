@@ -56,20 +56,10 @@ func isSnapPath(terminalPath string) (bool, string) {
 
 // buildSnapCommand creates a command that runs through snap run.
 // Uses the pattern: snap run <snap-name> -- <args...>
-// The command is run through a shell to ensure proper argument handling,
-// as snap run may re-parse arguments in ways that break direct exec calls.
 func buildSnapCommand(ctx context.Context, snapName string, args ...string) *exec.Cmd {
-	// Build the full shell command with proper quoting
-	// We need to quote each argument properly for the shell
-	var quotedArgs []string
-	for _, arg := range args {
-		// Use single quotes and escape any single quotes within the argument
-		escaped := strings.ReplaceAll(arg, "'", "'\"'\"'")
-		quotedArgs = append(quotedArgs, "'"+escaped+"'")
-	}
-
-	shellCmd := "snap run " + snapName + " -- " + strings.Join(quotedArgs, " ")
-	return exec.CommandContext(ctx, "sh", "-c", shellCmd)
+	cmdArgs := []string{"run", snapName, "--"}
+	cmdArgs = append(cmdArgs, args...)
+	return exec.CommandContext(ctx, "snap", cmdArgs...)
 }
 
 // getTerminalArgs returns the arguments for a given terminal to execute a docker command.
