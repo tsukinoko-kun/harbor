@@ -60,7 +60,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
         run: |
-          go build -ldflags="-s -w" -o ${{ matrix.binary }} .
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          go build -ldflags="-s -w -X 'github.com/tsukinoko-kun/harbor/internal/version.Version=${VERSION}' -X 'github.com/tsukinoko-kun/harbor/internal/version.Commit=${COMMIT}'" -o ${{ matrix.binary }} .
 
       - name: Create macOS app bundle
         if: startsWith(matrix.os, 'macos')

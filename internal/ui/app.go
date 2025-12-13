@@ -12,10 +12,12 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget/material"
 
 	"github.com/tsukinoko-kun/harbor/internal/config"
 	"github.com/tsukinoko-kun/harbor/internal/docker"
 	"github.com/tsukinoko-kun/harbor/internal/models"
+	"github.com/tsukinoko-kun/harbor/internal/version"
 )
 
 // App represents the main application.
@@ -154,20 +156,29 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	// Fill background
 	paint.FillShape(gtx.Ops, a.theme.Colors.Background, clip.Rect{Max: gtx.Constraints.Max}.Op())
 
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-		// Sidebar
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X = gtx.Dp(unit.Dp(200))
-			gtx.Constraints.Max.X = gtx.Dp(unit.Dp(200))
-			return a.layoutSidebar(gtx)
-		}),
-		// Divider
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.layoutDivider(gtx)
-		}),
-		// Main content
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// Main area (sidebar + content)
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return a.layoutContent(gtx)
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				// Sidebar
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Dp(unit.Dp(200))
+					gtx.Constraints.Max.X = gtx.Dp(unit.Dp(200))
+					return a.layoutSidebar(gtx)
+				}),
+				// Divider
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutDivider(gtx)
+				}),
+				// Main content
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return a.layoutContent(gtx)
+				}),
+			)
+		}),
+		// Status bar
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.layoutStatusBar(gtx)
 		}),
 	)
 }
@@ -207,4 +218,30 @@ func (a *App) layoutContent(gtx layout.Context) layout.Dimensions {
 	default:
 		return layout.Dimensions{}
 	}
+}
+
+func (a *App) layoutStatusBar(gtx layout.Context) layout.Dimensions {
+	height := gtx.Dp(unit.Dp(24))
+
+	// Draw status bar background
+	rect := clip.Rect{Max: image.Point{X: gtx.Constraints.Max.X, Y: height}}
+	paint.FillShape(gtx.Ops, a.theme.Colors.SidebarBg, rect.Op())
+
+	// Draw top border
+	borderRect := clip.Rect{Max: image.Point{X: gtx.Constraints.Max.X, Y: gtx.Dp(unit.Dp(1))}}
+	paint.FillShape(gtx.Ops, a.theme.Colors.Border, borderRect.Op())
+
+	// Version text
+	versionText := version.Version + " (" + version.Commit + ")"
+
+	return layout.Inset{
+		Left:   unit.Dp(8),
+		Right:  unit.Dp(8),
+		Top:    unit.Dp(4),
+		Bottom: unit.Dp(4),
+	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		label := material.Label(a.theme.Material, unit.Sp(11), versionText)
+		label.Color = a.theme.Colors.TextMuted
+		return label.Layout(gtx)
+	})
 }
