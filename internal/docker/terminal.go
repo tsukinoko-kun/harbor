@@ -90,6 +90,17 @@ func (c *Client) GetContainerShell(ctx context.Context, containerID string) (str
 	return "/bin/sh", nil
 }
 
+// GetTerminalCommand returns the docker exec command string for opening a shell in the container.
+// This is used by the clipboard feature to copy the command without executing it.
+func (c *Client) GetTerminalCommand(ctx context.Context, containerID string) (string, error) {
+	shell, err := c.GetContainerShell(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to detect shell: %w", err)
+	}
+
+	return fmt.Sprintf("docker exec -it %s %s", containerID, shell), nil
+}
+
 // OpenTerminal opens a terminal window with a shell session in the specified container.
 // It uses the terminal specified in settings.
 func (c *Client) OpenTerminal(ctx context.Context, containerID string, terminal *config.Terminal) error {
@@ -97,12 +108,10 @@ func (c *Client) OpenTerminal(ctx context.Context, containerID string, terminal 
 		return fmt.Errorf("no terminal configured")
 	}
 
-	shell, err := c.GetContainerShell(ctx, containerID)
+	dockerExecCmd, err := c.GetTerminalCommand(ctx, containerID)
 	if err != nil {
-		return fmt.Errorf("failed to detect shell: %w", err)
+		return err
 	}
-
-	dockerExecCmd := fmt.Sprintf("docker exec -it %s %s", containerID, shell)
 
 	cmd, useRun := buildTerminalCommand(ctx, terminal, dockerExecCmd)
 

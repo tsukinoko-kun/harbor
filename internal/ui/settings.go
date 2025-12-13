@@ -105,14 +105,8 @@ func (v *SettingsView) layoutTerminalSection(gtx layout.Context) layout.Dimensio
 				return label.Layout(gtx)
 			})
 		}),
-		// Terminal options
+		// Terminal options (always has at least the clipboard option)
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if len(v.settings.Terminals) == 0 {
-				label := material.Body2(v.theme.Material, "No terminals detected on your system.")
-				label.Color = v.theme.Colors.TextMuted
-				return label.Layout(gtx)
-			}
-
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				v.layoutTerminalOptions(gtx)...,
 			)
@@ -178,9 +172,13 @@ func (v *SettingsView) layoutTerminalOption(gtx layout.Context, clickable *widge
 										label.Color = v.theme.Colors.Text
 										return label.Layout(gtx)
 									}),
-									// Terminal path
+									// Terminal path or description
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										label := material.Caption(v.theme.Material, terminal.Path)
+										description := terminal.Path
+										if terminal.IsCopyToClipboard() {
+											description = "Copies command to clipboard"
+										}
+										label := material.Caption(v.theme.Material, description)
 										label.Color = v.theme.Colors.TextMuted
 										return label.Layout(gtx)
 									}),

@@ -8,6 +8,9 @@ import (
 	"runtime"
 )
 
+// CopyToClipboardName is the name of the special "Copy to Clipboard" terminal option.
+const CopyToClipboardName = "Copy to Clipboard"
+
 // Terminal represents a detected terminal emulator.
 type Terminal struct {
 	Name string `json:"name"`
@@ -51,9 +54,15 @@ func Load() (*Settings, error) {
 		if os.IsNotExist(err) {
 			// Create default settings
 			settings := &Settings{}
-			settings.Terminals = DetectTerminals()
-			if len(settings.Terminals) > 0 {
-				settings.SelectedTerminal = settings.Terminals[0].Name
+			detectedTerminals := DetectTerminals()
+			// Always include the clipboard option
+			clipboardTerminal := Terminal{Name: CopyToClipboardName, Path: ""}
+			settings.Terminals = append([]Terminal{clipboardTerminal}, detectedTerminals...)
+			// If no terminals detected, default to clipboard; otherwise use first detected terminal
+			if len(detectedTerminals) == 0 {
+				settings.SelectedTerminal = CopyToClipboardName
+			} else {
+				settings.SelectedTerminal = detectedTerminals[0].Name
 			}
 			// Save the default settings
 			if saveErr := settings.Save(); saveErr != nil {
@@ -67,6 +76,19 @@ func Load() (*Settings, error) {
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, err
+	}
+
+	// Ensure clipboard option is always present
+	hasClipboard := false
+	for _, t := range settings.Terminals {
+		if t.Name == CopyToClipboardName {
+			hasClipboard = true
+			break
+		}
+	}
+	if !hasClipboard {
+		clipboardTerminal := Terminal{Name: CopyToClipboardName, Path: ""}
+		settings.Terminals = append([]Terminal{clipboardTerminal}, settings.Terminals...)
 	}
 
 	return &settings, nil
@@ -106,6 +128,11 @@ func (s *Settings) GetSelectedTerminal() *Terminal {
 		}
 	}
 	return nil
+}
+
+// IsCopyToClipboard returns true if this terminal is the "Copy to Clipboard" option.
+func (t *Terminal) IsCopyToClipboard() bool {
+	return t.Name == CopyToClipboardName
 }
 
 // DetectTerminals finds installed terminal emulators on the system.

@@ -3,9 +3,13 @@ package ui
 import (
 	"context"
 	"image"
+	"image/color"
+	"io"
+	"strings"
 	"sync"
 	"time"
 
+	"gioui.org/io/clipboard"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -48,6 +52,14 @@ type ContainersView struct {
 	errorMu      sync.RWMutex
 	errorMessage string
 	errorDismiss widget.Clickable
+
+	// Toast notification (for success messages like clipboard copy)
+	toastMu      sync.RWMutex
+	toastMessage string
+	toastExpiry  time.Time
+
+	// Clipboard command to copy (set when terminal button is clicked with clipboard option)
+	clipboardCmd string
 
 	// Confirmation dialog state
 	pendingDeleteType string           // "container" or "project"
@@ -110,11 +122,45 @@ func (v *ContainersView) getError() string {
 	return v.errorMessage
 }
 
+// setToast sets a toast message to display for a duration.
+func (v *ContainersView) setToast(msg string, duration time.Duration) {
+	v.toastMu.Lock()
+	defer v.toastMu.Unlock()
+	v.toastMessage = msg
+	v.toastExpiry = time.Now().Add(duration)
+}
+
+// clearToast clears the toast message.
+func (v *ContainersView) clearToast() {
+	v.toastMu.Lock()
+	defer v.toastMu.Unlock()
+	v.toastMessage = ""
+}
+
+// getToast returns the current toast message if it hasn't expired.
+func (v *ContainersView) getToast() string {
+	v.toastMu.RLock()
+	defer v.toastMu.RUnlock()
+	if v.toastMessage != "" && time.Now().After(v.toastExpiry) {
+		return ""
+	}
+	return v.toastMessage
+}
+
 // Layout renders the containers view.
 func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGroup) layout.Dimensions {
 	// Handle error dismiss button click
 	if v.errorDismiss.Clicked(gtx) {
 		v.clearError()
+	}
+
+	// Handle clipboard copy if a command is pending
+	if v.clipboardCmd != "" {
+		gtx.Execute(clipboard.WriteCmd{
+			Type: "text/plain",
+			Data: io.NopCloser(strings.NewReader(v.clipboardCmd)),
+		})
+		v.clipboardCmd = ""
 	}
 
 	if len(groups) == 0 {
@@ -155,6 +201,10 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 				// Error notification (if any)
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return v.layoutError(gtx)
+				}),
+				// Toast notification (if any)
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return v.layoutToast(gtx)
 				}),
 				// Header
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -228,6 +278,53 @@ func (v *ContainersView) layoutError(gtx layout.Context) layout.Dimensions {
 							})
 						}),
 					)
+				})
+			}),
+		)
+	})
+}
+
+func (v *ContainersView) layoutToast(gtx layout.Context) layout.Dimensions {
+	toastMsg := v.getToast()
+	if toastMsg == "" {
+		// Clear expired toast
+		v.toastMu.Lock()
+		if v.toastMessage != "" && time.Now().After(v.toastExpiry) {
+			v.toastMessage = ""
+		}
+		v.toastMu.Unlock()
+		return layout.Dimensions{}
+	}
+
+	// Success green color for toast
+	successBg := color.NRGBA{R: 0x22, G: 0x8B, B: 0x22, A: 0xFF} // Forest green
+	successText := color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+
+	return layout.Inset{
+		Top:   unit.Dp(8),
+		Left:  unit.Dp(16),
+		Right: unit.Dp(16),
+	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				rr := gtx.Dp(unit.Dp(6))
+				rect := clip.RRect{
+					Rect: image.Rectangle{Max: gtx.Constraints.Min},
+					NE:   rr, NW: rr, SE: rr, SW: rr,
+				}
+				paint.FillShape(gtx.Ops, successBg, rect.Op(gtx.Ops))
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{
+					Top:    unit.Dp(12),
+					Bottom: unit.Dp(12),
+					Left:   unit.Dp(16),
+					Right:  unit.Dp(16),
+				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body2(v.theme.Material, toastMsg)
+					label.Color = successText
+					return label.Layout(gtx)
 				})
 			}),
 		)
@@ -375,17 +472,35 @@ func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container)
 			v.pendingDeleteName = c.Name
 		}
 		if btns.terminal.Clicked(gtx) {
-			btns.processing = true
 			containerID := c.ID
 			terminal := v.settings.GetSelectedTerminal()
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				if err := v.docker.OpenTerminal(ctx, containerID, terminal); err != nil {
-					v.setError("Terminal error: " + err.Error())
-				}
-				btns.processing = false
-			}()
+			if terminal != nil && terminal.IsCopyToClipboard() {
+				// Copy command to clipboard instead of opening terminal
+				btns.processing = true
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					cmd, err := v.docker.GetTerminalCommand(ctx, containerID)
+					if err != nil {
+						v.setError("Failed to get command: " + err.Error())
+					} else {
+						v.clipboardCmd = cmd
+						v.setToast("Command copied to clipboard", 3*time.Second)
+					}
+					btns.processing = false
+				}()
+			} else {
+				// Open terminal normally
+				btns.processing = true
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					if err := v.docker.OpenTerminal(ctx, containerID, terminal); err != nil {
+						v.setError("Terminal error: " + err.Error())
+					}
+					btns.processing = false
+				}()
+			}
 		}
 		if btns.logs.Clicked(gtx) {
 			containerID := c.ID
