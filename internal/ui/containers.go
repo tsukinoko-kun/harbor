@@ -48,6 +48,13 @@ type ContainersView struct {
 	errorMu      sync.RWMutex
 	errorMessage string
 	errorDismiss widget.Clickable
+
+	// Confirmation dialog state
+	pendingDeleteType string           // "container" or "project"
+	pendingDeleteID   string           // Container ID or project name
+	pendingDeleteName string           // Display name for the dialog
+	confirmDelete     widget.Clickable // Confirm button
+	cancelDelete      widget.Clickable // Cancel button
 }
 
 // NewContainersView creates a new containers view.
@@ -111,7 +118,14 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 	}
 
 	if len(groups) == 0 {
-		return v.layoutEmpty(gtx)
+		return layout.Stack{}.Layout(gtx,
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return v.layoutEmpty(gtx)
+			}),
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				return v.layoutConfirmDialog(gtx)
+			}),
+		)
 	}
 
 	// Flatten groups into items for the list
@@ -134,29 +148,38 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 		}
 	}
 
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// Error notification (if any)
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return v.layoutError(gtx)
+	return layout.Stack{}.Layout(gtx,
+		// Main content
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				// Error notification (if any)
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return v.layoutError(gtx)
+				}),
+				// Header
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return v.layoutHeader(gtx, countContainers(groups))
+				}),
+				// Container list
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{
+						Left:  unit.Dp(16),
+						Right: unit.Dp(16),
+					}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return v.list.Layout(gtx, len(items), func(gtx layout.Context, index int) layout.Dimensions {
+							item := items[index]
+							if item.isHeader {
+								return v.layoutGroupHeader(gtx, item.group)
+							}
+							return v.layoutContainer(gtx, item.container)
+						})
+					})
+				}),
+			)
 		}),
-		// Header
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return v.layoutHeader(gtx, countContainers(groups))
-		}),
-		// Container list
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{
-				Left:  unit.Dp(16),
-				Right: unit.Dp(16),
-			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return v.list.Layout(gtx, len(items), func(gtx layout.Context, index int) layout.Dimensions {
-					item := items[index]
-					if item.isHeader {
-						return v.layoutGroupHeader(gtx, item.group)
-					}
-					return v.layoutContainer(gtx, item.container)
-				})
-			})
+		// Confirmation dialog overlay
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutConfirmDialog(gtx)
 		}),
 	)
 }
@@ -260,14 +283,9 @@ func (v *ContainersView) layoutGroupHeader(gtx layout.Context, group docker.Cont
 			}
 		}
 		if btns.delete.Clicked(gtx) {
-			btns.processing = true
-			projectName := group.Name
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				_ = v.docker.RemoveProject(ctx, projectName)
-				btns.processing = false
-			}()
+			v.pendingDeleteType = "project"
+			v.pendingDeleteID = group.Name
+			v.pendingDeleteName = group.Name
 		}
 	}
 
@@ -352,14 +370,9 @@ func (v *ContainersView) layoutContainer(gtx layout.Context, c docker.Container)
 			}
 		}
 		if btns.delete.Clicked(gtx) {
-			btns.processing = true
-			containerID := c.ID
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				_ = v.docker.RemoveContainer(ctx, containerID)
-				btns.processing = false
-			}()
+			v.pendingDeleteType = "container"
+			v.pendingDeleteID = c.ID
+			v.pendingDeleteName = c.Name
 		}
 		if btns.terminal.Clicked(gtx) {
 			btns.processing = true
@@ -517,6 +530,183 @@ func (v *ContainersView) layoutButtonContent(gtx layout.Context, label string, i
 				Right:  unit.Dp(8),
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				lbl := material.Caption(v.theme.Material, displayLabel)
+				lbl.Color = textColor
+				return lbl.Layout(gtx)
+			})
+		}),
+	)
+}
+
+// layoutConfirmDialog renders a modal confirmation dialog overlay.
+func (v *ContainersView) layoutConfirmDialog(gtx layout.Context) layout.Dimensions {
+	if v.pendingDeleteType == "" {
+		return layout.Dimensions{}
+	}
+
+	// Handle button clicks
+	if v.cancelDelete.Clicked(gtx) {
+		v.pendingDeleteType = ""
+		v.pendingDeleteID = ""
+		v.pendingDeleteName = ""
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	}
+
+	if v.confirmDelete.Clicked(gtx) {
+		deleteType := v.pendingDeleteType
+		deleteID := v.pendingDeleteID
+
+		// Clear state first
+		v.pendingDeleteType = ""
+		v.pendingDeleteID = ""
+		v.pendingDeleteName = ""
+
+		// Execute delete based on type
+		if deleteType == "container" {
+			if btns, ok := v.containerButtons[deleteID]; ok {
+				btns.processing = true
+			}
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = v.docker.RemoveContainer(ctx, deleteID)
+				if btns, ok := v.containerButtons[deleteID]; ok {
+					btns.processing = false
+				}
+			}()
+		} else if deleteType == "project" {
+			if btns, ok := v.projectButtons[deleteID]; ok {
+				btns.processing = true
+			}
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = v.docker.RemoveProject(ctx, deleteID)
+				if btns, ok := v.projectButtons[deleteID]; ok {
+					btns.processing = false
+				}
+			}()
+		}
+
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	}
+
+	// Semi-transparent backdrop
+	return layout.Stack{}.Layout(gtx,
+		// Backdrop
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			paint.FillShape(gtx.Ops, rgba(0x000000, 0xCC), clip.Rect{Max: gtx.Constraints.Max}.Op())
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		}),
+		// Dialog (use Expanded to fill the space, then Center within it)
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				// Constrain dialog width
+				gtx.Constraints.Max.X = gtx.Dp(unit.Dp(400))
+				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(300))
+
+				return layout.Stack{}.Layout(gtx,
+					// Dialog background
+					layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+						rr := gtx.Dp(unit.Dp(8))
+						rect := clip.RRect{
+							Rect: image.Rectangle{Max: gtx.Constraints.Min},
+							NE:   rr, NW: rr, SE: rr, SW: rr,
+						}
+						paint.FillShape(gtx.Ops, v.theme.Colors.Surface, rect.Op(gtx.Ops))
+						return layout.Dimensions{Size: gtx.Constraints.Min}
+					}),
+					// Dialog content
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{
+							Top:    unit.Dp(20),
+							Bottom: unit.Dp(20),
+							Left:   unit.Dp(24),
+							Right:  unit.Dp(24),
+						}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								// Title
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									title := material.H6(v.theme.Material, "Confirm Delete")
+									title.Color = v.theme.Colors.Text
+									return title.Layout(gtx)
+								}),
+								// Spacing
+								layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+								// Message
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									msg := "Are you sure you want to delete \"" + v.pendingDeleteName + "\"?"
+									label := material.Body1(v.theme.Material, msg)
+									label.Color = v.theme.Colors.TextSecondary
+									return label.Layout(gtx)
+								}),
+								// Spacing
+								layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
+								// Buttons
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{
+										Axis:    layout.Horizontal,
+										Spacing: layout.SpaceStart,
+									}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											return layout.Dimensions{}
+										}),
+										// Cancel button
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return v.cancelDelete.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												return v.layoutDialogButton(gtx, "Cancel", false, v.cancelDelete.Hovered())
+											})
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+										// Delete button
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return v.confirmDelete.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												return v.layoutDialogButton(gtx, "Delete", true, v.confirmDelete.Hovered())
+											})
+										}),
+									)
+								}),
+							)
+						})
+					}),
+				)
+			})
+		}),
+	)
+}
+
+// layoutDialogButton renders a button for the confirmation dialog.
+func (v *ContainersView) layoutDialogButton(gtx layout.Context, label string, isDanger bool, hovered bool) layout.Dimensions {
+	bgColor := v.theme.Colors.ButtonBg
+	textColor := v.theme.Colors.Text
+
+	if hovered {
+		if isDanger {
+			bgColor = v.theme.Colors.ButtonDangerHov
+		} else {
+			bgColor = v.theme.Colors.ButtonHover
+		}
+	} else if isDanger {
+		bgColor = v.theme.Colors.ButtonDanger
+	}
+
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			rr := gtx.Dp(unit.Dp(4))
+			rect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Min},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top:    unit.Dp(8),
+				Bottom: unit.Dp(8),
+				Left:   unit.Dp(16),
+				Right:  unit.Dp(16),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Body2(v.theme.Material, label)
 				lbl.Color = textColor
 				return lbl.Layout(gtx)
 			})
