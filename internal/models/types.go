@@ -8,6 +8,7 @@ const (
 	ViewImages
 	ViewVolumes
 	ViewNetworks
+	ViewDebug
 	ViewSettings
 )
 
@@ -22,6 +23,8 @@ func (v View) String() string {
 		return "Volumes"
 	case ViewNetworks:
 		return "Networks"
+	case ViewDebug:
+		return "Debug"
 	case ViewSettings:
 		return "Settings"
 	default:

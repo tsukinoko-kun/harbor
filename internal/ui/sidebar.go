@@ -38,6 +38,7 @@ func NewSidebar(theme *Theme, onSelect func(models.View)) *Sidebar {
 			{view: models.ViewImages, label: "Images"},
 			{view: models.ViewVolumes, label: "Volumes"},
 			{view: models.ViewNetworks, label: "Networks"},
+			{view: models.ViewDebug, label: "Debug"},
 		},
 		settingsItem: sidebarItem{view: models.ViewSettings, label: "Settings"},
 		list: widget.List{

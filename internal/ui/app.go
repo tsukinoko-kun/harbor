@@ -35,6 +35,7 @@ type App struct {
 	images      *ImagesView
 	volumes     *VolumesView
 	networks    *NetworksView
+	debugUI     *DebugView
 	settingsUI  *SettingsView
 
 	// Data
@@ -63,6 +64,7 @@ func NewApp(dockerClient *docker.Client, settings *config.Settings) *App {
 	a.images = NewImagesView(theme)
 	a.volumes = NewVolumesView(theme)
 	a.networks = NewNetworksView(theme)
+	a.debugUI = NewDebugView(theme)
 	a.settingsUI = NewSettingsView(theme, settings)
 
 	return a
@@ -225,6 +227,8 @@ func (a *App) layoutContent(gtx layout.Context) layout.Dimensions {
 		return a.volumes.Layout(gtx, a.volumeList)
 	case models.ViewNetworks:
 		return a.networks.Layout(gtx, a.networkList)
+	case models.ViewDebug:
+		return a.debugUI.Layout(gtx)
 	case models.ViewSettings:
 		return a.settingsUI.Layout(gtx)
 	default:
