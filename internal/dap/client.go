@@ -40,12 +40,11 @@ func NewClient(params DebugParams) *DapClient {
 }
 
 // Close closes the DAP client connection and cleans up resources.
-func (c *DapClient) Close() error {
+func (c *DapClient) Close() {
 	if c == nil {
-		return nil
+		return
 	}
 	if c.UpdateChan != nil {
 		close(c.UpdateChan)
 	}
-	return nil
 }
