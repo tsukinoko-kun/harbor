@@ -22,6 +22,7 @@ import (
 	"github.com/sqweek/dialog"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
+	"github.com/tsukinoko-kun/harbor/internal/config"
 	"github.com/tsukinoko-kun/harbor/internal/dap"
 	"github.com/tsukinoko-kun/harbor/internal/terminal"
 	ts_dockerfile "github.com/tsukinoko-kun/harbor/internal/treesitter/dockerfile"
@@ -240,7 +241,8 @@ func fillGaps(tokens []highlightToken, line string) []highlightToken {
 
 // DebugView displays debug information and controls.
 type DebugView struct {
-	theme *Theme
+	theme    *Theme
+	settings *config.Settings
 
 	// Form state for start phase
 	dockerfileEditor       widget.Editor
@@ -272,9 +274,10 @@ type DebugView struct {
 }
 
 // NewDebugView creates a new debug view.
-func NewDebugView(theme *Theme) *DebugView {
+func NewDebugView(theme *Theme, settings *config.Settings) *DebugView {
 	return &DebugView{
-		theme: theme,
+		theme:    theme,
+		settings: settings,
 		dockerfileEditor: widget.Editor{
 			SingleLine: true,
 			Submit:     true,
@@ -347,6 +350,7 @@ func (v *DebugView) layoutStartForm(gtx layout.Context) layout.Dimensions {
 		params := dap.DebugParams{
 			Dockerfile: v.dockerfileEditor.Text(),
 			Context:    v.contextEditor.Text(),
+			PS1:        v.settings.DebugPS1,
 		}
 		client, err := dap.NewClient(params)
 		if err != nil {

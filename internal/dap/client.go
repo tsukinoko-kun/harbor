@@ -36,6 +36,9 @@ type DebugParams struct {
 	Dockerfile string
 	// Context is the build context directory for the Dockerfile.
 	Context string
+	// PS1 is the shell prompt to inject when the shell becomes ready.
+	// Should include a reset sequence to prevent color leaking between commands.
+	PS1 string
 }
 
 // LaunchConfig matches the buildx DAP launch configuration format.
@@ -770,6 +773,15 @@ func (c *DapClient) connectShell(socketPath string) {
 				c.shellReady = true
 				c.shellMu.Unlock()
 				log.Printf("[DAP] Shell ready")
+
+				// Inject a PS1 that resets colors before each prompt.
+				// This prevents colors from "leaking" between commands - if a command
+				// outputs colored text without resetting (no \x1b[0m), the prompt
+				// would normally inherit that color. By setting PS1 to include a reset
+				// sequence, we ensure every prompt starts with default colors.
+				if c.Params.PS1 != "" {
+					_, _ = conn.Write([]byte(fmt.Sprintf("export PS1='%s'\n", c.Params.PS1)))
+				}
 
 				// If we have a pending command, send it now
 				if c.pendingExpression != "" {

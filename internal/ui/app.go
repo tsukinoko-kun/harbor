@@ -65,7 +65,7 @@ func NewApp(dockerClient *docker.Client, settings *config.Settings) *App {
 	a.images = NewImagesView(theme)
 	a.volumes = NewVolumesView(theme)
 	a.networks = NewNetworksView(theme)
-	a.debugUI = NewDebugView(theme)
+	a.debugUI = NewDebugView(theme, settings)
 	a.settingsUI = NewSettingsView(theme, settings)
 
 	return a

@@ -21,18 +21,26 @@ type SettingsView struct {
 	settings        *config.Settings
 	list            widget.List
 	terminalButtons []widget.Clickable
+	ps1Editor       widget.Editor
+	ps1ResetButton  widget.Clickable
 }
 
 // NewSettingsView creates a new settings view.
 func NewSettingsView(theme *Theme, settings *config.Settings) *SettingsView {
-	return &SettingsView{
+	v := &SettingsView{
 		theme:    theme,
 		settings: settings,
 		list: widget.List{
 			List: layout.List{Axis: layout.Vertical},
 		},
 		terminalButtons: make([]widget.Clickable, len(settings.Terminals)),
+		ps1Editor: widget.Editor{
+			SingleLine: true,
+			Submit:     true,
+		},
 	}
+	v.ps1Editor.SetText(settings.DebugPS1)
+	return v
 }
 
 // Layout renders the settings view.
@@ -84,11 +92,13 @@ func (v *SettingsView) layoutHeader(gtx layout.Context) layout.Dimensions {
 }
 
 func (v *SettingsView) layoutContent(gtx layout.Context) layout.Dimensions {
-	return v.list.Layout(gtx, 2, func(gtx layout.Context, index int) layout.Dimensions {
+	return v.list.Layout(gtx, 3, func(gtx layout.Context, index int) layout.Dimensions {
 		switch index {
 		case 0:
 			return v.layoutTerminalSection(gtx)
 		case 1:
+			return v.layoutDebugSection(gtx)
+		case 2:
 			return v.layoutVersionSection(gtx)
 		default:
 			return layout.Dimensions{}
@@ -121,6 +131,121 @@ func (v *SettingsView) layoutTerminalSection(gtx layout.Context) layout.Dimensio
 			)
 		}),
 	)
+}
+
+func (v *SettingsView) layoutDebugSection(gtx layout.Context) layout.Dimensions {
+	// Handle PS1 editor changes
+	for {
+		event, ok := v.ps1Editor.Update(gtx)
+		if !ok {
+			break
+		}
+		if _, ok := event.(widget.ChangeEvent); ok {
+			v.settings.DebugPS1 = v.ps1Editor.Text()
+			go func() {
+				_ = v.settings.Save()
+			}()
+		}
+	}
+
+	// Handle reset button
+	if v.ps1ResetButton.Clicked(gtx) {
+		v.settings.DebugPS1 = config.DefaultDebugPS1
+		v.ps1Editor.SetText(config.DefaultDebugPS1)
+		go func() {
+			_ = v.settings.Save()
+		}()
+	}
+
+	return layout.Inset{Top: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			// Section header
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.H6(v.theme.Material, "Debug Console")
+					label.Color = v.theme.Colors.Text
+					return label.Layout(gtx)
+				})
+			}),
+			// Description
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body2(v.theme.Material, "Shell prompt (PS1) for debug sessions. Include \\[\\033[0m\\] to reset colors.")
+					label.Color = v.theme.Colors.TextMuted
+					return label.Layout(gtx)
+				})
+			}),
+			// PS1 editor card
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Stack{}.Layout(gtx,
+					layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+						rr := gtx.Dp(unit.Dp(6))
+						rect := clip.RRect{
+							Rect: image.Rectangle{Max: gtx.Constraints.Min},
+							NE:   rr, NW: rr, SE: rr, SW: rr,
+						}
+						paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, rect.Op(gtx.Ops))
+						return layout.Dimensions{Size: gtx.Constraints.Min}
+					}),
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{
+							Top:    unit.Dp(12),
+							Bottom: unit.Dp(12),
+							Left:   unit.Dp(16),
+							Right:  unit.Dp(16),
+						}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+								// PS1 Editor
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									e := material.Editor(v.theme.Material, &v.ps1Editor, "PS1 prompt...")
+									e.Font.Typeface = v.theme.MonoTypeface
+									e.Color = v.theme.Colors.Text
+									e.HintColor = v.theme.Colors.TextMuted
+									return e.Layout(gtx)
+								}),
+								layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+								// Reset button
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return v.ps1ResetButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										if v.ps1ResetButton.Hovered() {
+											pointer.CursorPointer.Add(gtx.Ops)
+										}
+										return layout.Stack{}.Layout(gtx,
+											layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+												bgColor := v.theme.Colors.ButtonBg
+												if v.ps1ResetButton.Hovered() {
+													bgColor = v.theme.Colors.ButtonHover
+												}
+												rr := gtx.Dp(unit.Dp(4))
+												rect := clip.RRect{
+													Rect: image.Rectangle{Max: gtx.Constraints.Min},
+													NE:   rr, NW: rr, SE: rr, SW: rr,
+												}
+												paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+												return layout.Dimensions{Size: gtx.Constraints.Min}
+											}),
+											layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+												return layout.Inset{
+													Top:    unit.Dp(6),
+													Bottom: unit.Dp(6),
+													Left:   unit.Dp(12),
+													Right:  unit.Dp(12),
+												}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+													label := material.Body2(v.theme.Material, "Reset")
+													label.Color = v.theme.Colors.Text
+													return label.Layout(gtx)
+												})
+											}),
+										)
+									})
+								}),
+							)
+						})
+					}),
+				)
+			}),
+		)
+	})
 }
 
 func (v *SettingsView) layoutTerminalOptions(gtx layout.Context) []layout.FlexChild {
