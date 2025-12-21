@@ -20,8 +20,25 @@ import (
 	"gioui.org/widget/material"
 	"github.com/sqweek/dialog"
 
+	ts "github.com/tree-sitter/go-tree-sitter"
 	"github.com/tsukinoko-kun/harbor/internal/dap"
+	ts_dockerfile "github.com/tsukinoko-kun/harbor/internal/treesitter/dockerfile"
 )
+
+var (
+	tsDockerfileLanguage *ts.Language
+	tsDockerfileQuery    *ts.Query
+)
+
+func init() {
+	tsDockerfileLanguage = ts.NewLanguage(ts_dockerfile.Language())
+
+	var err *ts.QueryError = nil
+	tsDockerfileQuery, err = ts.NewQuery(tsDockerfileLanguage, ts_dockerfile.QueryHighlights)
+	if err != nil {
+		panic(err)
+	}
+}
 
 // DebugView displays debug information and controls.
 type DebugView struct {
