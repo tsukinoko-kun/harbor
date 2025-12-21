@@ -16,6 +16,7 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/tsukinoko-kun/harbor/internal/config"
+	"github.com/tsukinoko-kun/harbor/internal/dap"
 	"github.com/tsukinoko-kun/harbor/internal/docker"
 	"github.com/tsukinoko-kun/harbor/internal/models"
 	"github.com/tsukinoko-kun/harbor/internal/version"
@@ -103,10 +104,24 @@ func (a *App) refreshLoop() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		a.refreshData()
-		if a.window != nil {
-			a.window.Invalidate()
+	for {
+		// Get the current DAP update channel (may be nil if no client)
+		var dapUpdateChan <-chan struct{}
+		if dap.Client != nil {
+			dapUpdateChan = dap.Client.UpdateChan
+		}
+
+		select {
+		case <-ticker.C:
+			a.refreshData()
+			if a.window != nil {
+				a.window.Invalidate()
+			}
+		case <-dapUpdateChan:
+			// DAP client sent an update, invalidate the UI
+			if a.window != nil {
+				a.window.Invalidate()
+			}
 		}
 	}
 }

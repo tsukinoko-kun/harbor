@@ -7,6 +7,7 @@ import (
 	"gioui.org/app"
 
 	"github.com/tsukinoko-kun/harbor/internal/config"
+	"github.com/tsukinoko-kun/harbor/internal/dap"
 	"github.com/tsukinoko-kun/harbor/internal/docker"
 	"github.com/tsukinoko-kun/harbor/internal/ui"
 )
@@ -30,6 +31,7 @@ func main() {
 	// Run the application in a goroutine
 	go func() {
 		defer dockerClient.Close()
+		defer dap.Client.Close()
 
 		application := ui.NewApp(dockerClient, settings)
 		if err := application.Run(); err != nil {
