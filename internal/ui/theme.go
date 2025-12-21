@@ -55,11 +55,11 @@ func DefaultColors() Colors {
 		StatusStopped:   rgb(0xf87171), // Red
 		StatusPaused:    rgb(0xfbbf24), // Yellow
 		StatusCreated:   rgb(0x9ca3af), // Gray
-		Accent:          rgb(0x60a5fa), // Blue
-		Primary:         rgb(0x60a5fa), // Blue (same as accent)
+		Accent:          rgb(0x818cf8), // Indigo
+		Primary:         rgb(0x818cf8), // Indigo (primary color)
 		GroupHeader:     rgb(0x2a2a2a),
 		CardBg:          rgb(0x2a2a2a),
-		SelectedBg:      rgb(0x1e3a5f), // Dark blue for selection
+		SelectedBg:      rgb(0x312e81), // Dark indigo for selection
 		ButtonBg:        rgb(0x3d3d3d),
 		ButtonHover:     rgb(0x4d4d4d),
 		ButtonDanger:    rgb(0xdc2626), // Red
