@@ -4,18 +4,21 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"sync"
 	"sync/atomic"
 
+	"github.com/docker/buildx/builder"
 	"github.com/docker/buildx/commands"
 	buildxdap "github.com/docker/buildx/dap"
 	"github.com/docker/buildx/dap/common"
 	_ "github.com/docker/buildx/driver/docker"
 	_ "github.com/docker/buildx/driver/docker-container"
 	_ "github.com/docker/buildx/driver/kubernetes"
+	"github.com/docker/buildx/store/storeutil"
 	"github.com/docker/buildx/util/progress"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/flags"
@@ -475,6 +478,48 @@ func (c *DapClient) SendContinue() error {
 	return c.sendRequest(req)
 }
 
+// harborBuilderName is the name of the docker-container builder used for debugging.
+const harborBuilderName = "harbor-debug"
+
+// ensureDockerContainerBuilder ensures a docker-container driver builder exists.
+// It returns the builder name to use for builds.
+// If a builder named "harbor-debug" already exists with the docker-container driver,
+// it will be reused. Otherwise, a new one is created.
+func ensureDockerContainerBuilder(ctx context.Context, dockerCli command.Cli) (string, error) {
+	txn, release, err := storeutil.GetStore(dockerCli)
+	if err != nil {
+		return "", fmt.Errorf("failed to get buildx store: %w", err)
+	}
+	defer release()
+
+	// Check if our builder already exists
+	ng, err := txn.NodeGroupByName(harborBuilderName)
+	if err == nil && ng != nil && ng.Driver == "docker-container" {
+		log.Printf("[Build] Using existing docker-container builder: %s", harborBuilderName)
+		return harborBuilderName, nil
+	}
+
+	// Builder doesn't exist or has wrong driver, create a new one
+	log.Printf("[Build] Creating docker-container builder: %s", harborBuilderName)
+
+	b, err := builder.Create(ctx, txn, dockerCli, builder.CreateOpts{
+		Name:   harborBuilderName,
+		Driver: "docker-container",
+		Use:    false, // Don't set as global default
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create docker-container builder: %w", err)
+	}
+
+	// Boot the builder to ensure it's ready
+	log.Printf("[Build] Booting builder: %s", b.Name)
+	if _, err := b.Boot(ctx); err != nil {
+		return "", fmt.Errorf("failed to boot builder: %w", err)
+	}
+
+	return b.Name, nil
+}
+
 // runBuildWithHandler runs the Docker build using buildx with the DAP handler.
 func (c *DapClient) runBuildWithHandler() {
 	log.Println("[Build] Starting Docker build with DAP handler...")
@@ -496,14 +541,21 @@ func (c *DapClient) runBuildWithHandler() {
 		return
 	}
 
+	// Ensure we have a docker-container builder for debugging
+	builderName, err := ensureDockerContainerBuilder(c.ctx, dockerCli)
+	if err != nil {
+		log.Printf("[Build] Failed to ensure docker-container builder: %v", err)
+		return
+	}
+
 	// Get the DAP handler from the adapter
 	handler := c.adapter.Handler()
 
-	// Create build options
-	// Leave Builder empty to use the current default builder
+	// Create build options with our docker-container builder
 	buildOpts := &commands.BuildOptions{
 		ContextPath:    c.Params.Context,
 		DockerfileName: c.Params.Dockerfile,
+		Builder:        builderName,
 		NoCache:        true,
 		Pull:           true,
 		ExportLoad:     true, // Load the image into docker
