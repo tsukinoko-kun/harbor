@@ -108,6 +108,9 @@ type DapClient struct {
 	// StoppedThreadId is the thread ID from the last StoppedEvent,
 	// needed for Next/Continue requests.
 	StoppedThreadId int
+	// CurrentLine is the line number from the current stack frame (1-indexed).
+	// This is updated when the debugger stops.
+	CurrentLine int
 
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -402,6 +405,10 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		log.Printf("[DAP] Stopped: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
 		c.Stopped = true
 		c.StoppedThreadId = m.Body.ThreadId
+		// Fetch the current stack trace to get line number
+		if err := c.GetStackTrace(); err != nil {
+			log.Printf("[DAP] Failed to get stack trace: %v", err)
+		}
 		// Notify UI that data changed
 		select {
 		case c.UpdateChan <- struct{}{}:
@@ -476,6 +483,51 @@ func (c *DapClient) SendContinue() error {
 
 	c.Stopped = false
 	return c.sendRequest(req)
+}
+
+// GetStackTrace sends a DAP stackTrace request and updates CurrentLine.
+// This should be called when the debugger is stopped to get the current execution position.
+func (c *DapClient) GetStackTrace() error {
+	if !c.Stopped {
+		return nil
+	}
+
+	req := &godap.StackTraceRequest{
+		Request: godap.Request{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  c.nextSeq(),
+				Type: "request",
+			},
+			Command: "stackTrace",
+		},
+		Arguments: godap.StackTraceArguments{
+			ThreadId: c.StoppedThreadId,
+		},
+	}
+
+	if err := c.sendRequest(req); err != nil {
+		return err
+	}
+
+	// Read responses until we get the StackTraceResponse
+	for {
+		msg, err := c.readResponse()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		if resp, ok := msg.(*godap.StackTraceResponse); ok {
+			// Extract line number from the top stack frame
+			if len(resp.Body.StackFrames) > 0 {
+				c.CurrentLine = resp.Body.StackFrames[0].Line
+				log.Printf("[DAP] Current line: %d", c.CurrentLine)
+			}
+			return nil
+		}
+		// Continue reading (might get events first)
+	}
 }
 
 // harborBuilderName is the name of the docker-container builder used for debugging.

@@ -1,12 +1,16 @@
 package ui
 
 import (
+	"bufio"
+	"fmt"
 	"image"
 	"image/color"
 	"log"
+	"os"
 	"path/filepath"
 
 	"gio.tools/icons"
+	"gioui.org/font"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -31,8 +35,13 @@ type DebugView struct {
 	startButton            widget.Clickable
 
 	// Debug control buttons
-	stepOverButton  widget.Clickable
-	continueButton  widget.Clickable
+	stepOverButton widget.Clickable
+	continueButton widget.Clickable
+
+	// Dockerfile viewer state
+	dockerfileLines []string    // Cached lines from the Dockerfile
+	dockerfilePath  string      // Path to the currently loaded Dockerfile
+	dockerfileList  widget.List // Scrollable list for Dockerfile lines
 }
 
 // NewDebugView creates a new debug view.
@@ -46,6 +55,11 @@ func NewDebugView(theme *Theme) *DebugView {
 		contextEditor: widget.Editor{
 			SingleLine: true,
 			Submit:     true,
+		},
+		dockerfileList: widget.List{
+			List: layout.List{
+				Axis: layout.Vertical,
+			},
 		},
 	}
 }
@@ -339,42 +353,175 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		// Status message
+		// Status message and current line info
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				var statusText string
 				if dap.Client.Stopped {
-					statusText = "Debugger paused"
+					statusText = fmt.Sprintf("Paused at line %d", dap.Client.CurrentLine)
 				} else {
-					statusText = "Debugger running..."
+					statusText = "Running..."
 				}
 				label := material.Body1(v.theme.Material, statusText)
 				label.Color = v.theme.Colors.Text
 				return label.Layout(gtx)
 			})
 		}),
-		// Dockerfile info
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				params := dap.Client.Params
-				label := material.Body2(v.theme.Material, "Dockerfile: "+params.Dockerfile)
-				label.Color = v.theme.Colors.TextMuted
-				return label.Layout(gtx)
-			})
-		}),
-		// Context info
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				params := dap.Client.Params
-				label := material.Body2(v.theme.Material, "Context: "+params.Context)
-				label.Color = v.theme.Colors.TextMuted
-				return label.Layout(gtx)
-			})
-		}),
 		// Debug control buttons
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(12), Bottom: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return v.layoutDebugButtons(gtx)
+			})
+		}),
+		// Dockerfile viewer (takes remaining space)
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return v.layoutDockerfile(gtx)
+		}),
+	)
+}
+
+// loadDockerfile reads the Dockerfile content into dockerfileLines.
+// It caches the result and only reloads if the path changes.
+func (v *DebugView) loadDockerfile(path string) {
+	if path == v.dockerfilePath && len(v.dockerfileLines) > 0 {
+		return // Already loaded
+	}
+
+	v.dockerfilePath = path
+	v.dockerfileLines = nil
+
+	file, err := os.Open(path)
+	if err != nil {
+		log.Printf("Failed to open Dockerfile: %v", err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		v.dockerfileLines = append(v.dockerfileLines, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("Failed to read Dockerfile: %v", err)
+	}
+}
+
+// layoutDockerfile renders the Dockerfile content with line numbers and execution marker.
+func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
+	if dap.Client == nil {
+		return layout.Dimensions{}
+	}
+
+	// Load the Dockerfile if not already loaded
+	v.loadDockerfile(dap.Client.Params.Dockerfile)
+
+	if len(v.dockerfileLines) == 0 {
+		// Show error message if Dockerfile couldn't be loaded
+		label := material.Body2(v.theme.Material, "Could not load Dockerfile")
+		label.Color = v.theme.Colors.TextMuted
+		return label.Layout(gtx)
+	}
+
+	currentLine := dap.Client.CurrentLine
+	isStopped := dap.Client.Stopped
+
+	// Calculate width needed for line numbers (based on total lines)
+	lineNumWidth := gtx.Dp(unit.Dp(40))
+	markerWidth := gtx.Dp(unit.Dp(24))
+
+	// Render in a card-like container
+	return layout.Stack{}.Layout(gtx,
+		// Background
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			rr := gtx.Dp(unit.Dp(6))
+			rect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Max},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, rect.Op(gtx.Ops))
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		}),
+		// Content
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top:    unit.Dp(8),
+				Bottom: unit.Dp(8),
+				Left:   unit.Dp(4),
+				Right:  unit.Dp(8),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return material.List(v.theme.Material, &v.dockerfileList).Layout(gtx, len(v.dockerfileLines), func(gtx layout.Context, index int) layout.Dimensions {
+					lineNum := index + 1 // 1-indexed
+					isCurrentLine := isStopped && lineNum == currentLine
+
+					return v.layoutDockerfileLine(gtx, lineNum, v.dockerfileLines[index], isCurrentLine, markerWidth, lineNumWidth)
+				})
+			})
+		}),
+	)
+}
+
+// layoutDockerfileLine renders a single line of the Dockerfile.
+func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, content string, isCurrentLine bool, markerWidth, lineNumWidth int) layout.Dimensions {
+	lineHeight := gtx.Dp(unit.Dp(22))
+
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		// Marker area (play arrow for current line)
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = markerWidth
+			gtx.Constraints.Max.X = markerWidth
+			gtx.Constraints.Min.Y = lineHeight
+			gtx.Constraints.Max.Y = lineHeight
+
+			if isCurrentLine {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					iconSize := gtx.Dp(unit.Dp(16))
+					gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+					gtx.Constraints.Max = gtx.Constraints.Min
+					return icons.AVPlayArrow.Layout(gtx, v.theme.Colors.Primary)
+				})
+			}
+			return layout.Dimensions{Size: image.Point{X: markerWidth, Y: lineHeight}}
+		}),
+		// Line number
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = lineNumWidth
+			gtx.Constraints.Max.X = lineNumWidth
+			gtx.Constraints.Min.Y = lineHeight
+			gtx.Constraints.Max.Y = lineHeight
+
+			return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body2(v.theme.Material, fmt.Sprintf("%d", lineNum))
+					label.Color = v.theme.Colors.TextMuted
+					return label.Layout(gtx)
+				})
+			})
+		}),
+		// Separator
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				// Draw vertical line separator
+				width := gtx.Dp(unit.Dp(1))
+				rect := clip.Rect{Max: image.Point{X: width, Y: lineHeight}}
+				paint.FillShape(gtx.Ops, v.theme.Colors.Border, rect.Op())
+				return layout.Dimensions{Size: image.Point{X: width, Y: lineHeight}}
+			})
+		}),
+		// Dockerfile content
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.Y = lineHeight
+			gtx.Constraints.Max.Y = lineHeight
+
+			return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				label := material.Body2(v.theme.Material, content)
+				label.Font.Weight = font.Medium
+				if isCurrentLine {
+					label.Color = v.theme.Colors.Text
+				} else {
+					label.Color = v.theme.Colors.TextMuted
+				}
+				return label.Layout(gtx)
 			})
 		}),
 	)
