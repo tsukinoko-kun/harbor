@@ -146,6 +146,10 @@ type DapClient struct {
 	shellConn  net.Conn   // Persistent connection to the shell
 	shellMu    sync.Mutex // Protects shellConn
 	shellReady bool       // True when shell is ready for commands
+
+	// Log buffer for UI display
+	logBuffer []string   // Stores log messages for the UI
+	logMu     sync.Mutex // Protects logBuffer
 }
 
 // Client is the global DAP client instance.
@@ -247,6 +251,37 @@ func (c *DapClient) Close() {
 	// Note: We don't close UpdateChan here because background goroutines
 	// may still try to send on it. The channel will be garbage collected
 	// when the client is no longer referenced.
+}
+
+// AppendLog adds a message to the log buffer and triggers a UI update.
+func (c *DapClient) AppendLog(message string) {
+	c.logMu.Lock()
+	c.logBuffer = append(c.logBuffer, message)
+	c.logMu.Unlock()
+
+	// Notify UI that data changed
+	select {
+	case c.UpdateChan <- struct{}{}:
+	default:
+	}
+}
+
+// GetLogs returns a copy of the log buffer.
+func (c *DapClient) GetLogs() []string {
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
+
+	// Return a copy to avoid race conditions
+	logs := make([]string, len(c.logBuffer))
+	copy(logs, c.logBuffer)
+	return logs
+}
+
+// log logs a message to both the standard logger and the UI log buffer.
+func (c *DapClient) log(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	log.Print(msg)
+	c.AppendLog(msg)
 }
 
 // nextSeq returns the next sequence number for DAP messages.
@@ -383,11 +418,11 @@ func (c *DapClient) sendConfigurationDone() error {
 
 // eventLoop listens for events from the DAP server and logs them.
 func (c *DapClient) eventLoop() {
-	log.Println("[DAP] Event loop started")
+	c.log("[DAP] Event loop started")
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Println("[DAP] Event loop stopped (context cancelled)")
+			c.log("[DAP] Event loop stopped (context cancelled)")
 			return
 		default:
 		}
@@ -395,10 +430,10 @@ func (c *DapClient) eventLoop() {
 		msg, err := c.readResponse()
 		if err != nil {
 			if err == io.EOF || c.ctx.Err() != nil {
-				log.Println("[DAP] Event loop ended (connection closed)")
+				c.log("[DAP] Event loop ended (connection closed)")
 				return
 			}
-			log.Printf("[DAP] Error reading message: %v", err)
+			c.log("[DAP] Error reading message: %v", err)
 			return
 		}
 
@@ -410,7 +445,7 @@ func (c *DapClient) eventLoop() {
 func (c *DapClient) handleMessage(msg godap.Message) {
 	switch m := msg.(type) {
 	case *godap.TerminatedEvent:
-		log.Println("[DAP] Build terminated")
+		c.log("[DAP] Build terminated")
 		// Notify UI that data changed
 		select {
 		case c.UpdateChan <- struct{}{}:
@@ -418,7 +453,7 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		}
 
 	case *godap.ExitedEvent:
-		log.Printf("[DAP] Build exited with code: %d", m.Body.ExitCode)
+		c.log("[DAP] Build exited with code: %d", m.Body.ExitCode)
 		// Notify UI that data changed
 		select {
 		case c.UpdateChan <- struct{}{}:
@@ -431,15 +466,15 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		if category == "" {
 			category = "console"
 		}
-		log.Printf("[DAP] Output [%s]: %s", category, m.Body.Output)
+		c.log("[DAP] Output [%s]: %s", category, m.Body.Output)
 
 	case *godap.StoppedEvent:
-		log.Printf("[DAP] Stopped: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
+		c.log("[DAP] Stopped: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
 		c.Stopped = true
 		c.StoppedThreadId = m.Body.ThreadId
 		// Fetch the current stack trace to get line number
 		if err := c.GetStackTrace(); err != nil {
-			log.Printf("[DAP] Failed to get stack trace: %v", err)
+			c.log("[DAP] Failed to get stack trace: %v", err)
 		}
 		// Notify UI that data changed
 		select {
@@ -448,10 +483,10 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		}
 
 	case *godap.ThreadEvent:
-		log.Printf("[DAP] Thread event: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
+		c.log("[DAP] Thread event: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
 
 	case *godap.ContinuedEvent:
-		log.Printf("[DAP] Continued: threadId=%d", m.Body.ThreadId)
+		c.log("[DAP] Continued: threadId=%d", m.Body.ThreadId)
 		c.Stopped = false
 		// Notify UI that data changed
 		select {
@@ -460,17 +495,17 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		}
 
 	case *godap.BreakpointEvent:
-		log.Printf("[DAP] Breakpoint event: reason=%s", m.Body.Reason)
+		c.log("[DAP] Breakpoint event: reason=%s", m.Body.Reason)
 
 	case *godap.InitializedEvent:
-		log.Println("[DAP] Initialized event received")
+		c.log("[DAP] Initialized event received")
 
 	case *godap.EvaluateResponse:
-		log.Printf("[DAP] Evaluate response: success=%v, result=%q", m.Success, m.Body.Result)
+		c.log("[DAP] Evaluate response: success=%v, result=%q", m.Success, m.Body.Result)
 		c.EvaluatePending = false
 
 	case *godap.ErrorResponse:
-		log.Printf("[DAP] Error response: command=%s, message=%s", m.Command, m.Message)
+		c.log("[DAP] Error response: command=%s, message=%s", m.Command, m.Message)
 		// Check if this is a response to an evaluate request
 		if m.Command == "evaluate" && c.EvaluatePending {
 			c.EvaluatePending = false
@@ -480,12 +515,12 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 
 	case *godap.RunInTerminalRequest:
 		// Server is asking us to run a command in a terminal
-		log.Printf("[DAP] RunInTerminal request: args=%v, cwd=%s", m.Arguments.Args, m.Arguments.Cwd)
+		c.log("[DAP] RunInTerminal request: args=%v, cwd=%s", m.Arguments.Args, m.Arguments.Cwd)
 		c.handleRunInTerminal(m)
 
 	default:
 		// Log unknown messages for debugging
-		log.Printf("[DAP] Unhandled message: %T %+v", msg, msg)
+		c.log("[DAP] Unhandled message: %T %+v", msg, msg)
 	}
 }
 
@@ -623,9 +658,9 @@ func (c *DapClient) GetStackTrace() error {
 				c.CurrentColumn = frame.Column
 				c.CurrentEndColumn = frame.EndColumn // Will be 0 if not provided
 				if c.CurrentEndLine > 0 {
-					log.Printf("[DAP] Current range: lines %d-%d", c.CurrentLine, c.CurrentEndLine)
+					c.log("[DAP] Current range: lines %d-%d", c.CurrentLine, c.CurrentEndLine)
 				} else {
-					log.Printf("[DAP] Current line: %d", c.CurrentLine)
+					c.log("[DAP] Current line: %d", c.CurrentLine)
 				}
 			}
 			return nil
@@ -670,11 +705,11 @@ func (c *DapClient) SendEvaluate(expression string) error {
 		},
 	}
 
-	log.Printf("[DAP] Opening shell session, then will run: %q", expression)
+	c.log("[DAP] Opening shell session, then will run: %q", expression)
 
 	err := c.sendRequest(req)
 	if err != nil {
-		log.Printf("[DAP] Failed to send exec request: %v", err)
+		c.log("[DAP] Failed to send exec request: %v", err)
 	}
 	return err
 }
@@ -696,7 +731,7 @@ func (c *DapClient) sendShellCommand(command string) error {
 	// command's styling, causing colors to "leak" between commands.
 	c.Console.ResetStyle()
 
-	log.Printf("[DAP] Sending to shell: %s", command)
+	c.log("[DAP] Sending to shell: %s", command)
 	_, err := conn.Write([]byte(command + "\n"))
 	return err
 }
@@ -704,7 +739,7 @@ func (c *DapClient) sendShellCommand(command string) error {
 // handleRunInTerminal handles a RunInTerminalRequest from the DAP server.
 // The buildx DAP uses this to set up exec sessions via Unix sockets.
 func (c *DapClient) handleRunInTerminal(req *godap.RunInTerminalRequest) {
-	log.Printf("[DAP] RunInTerminal request: kind=%s, args=%v", req.Arguments.Kind, req.Arguments.Args)
+	c.log("[DAP] RunInTerminal request: kind=%s, args=%v", req.Arguments.Kind, req.Arguments.Args)
 
 	// Look for socket path in args (format: "harbor dap attach <socket>")
 	var socketPath string
@@ -730,7 +765,7 @@ func (c *DapClient) handleRunInTerminal(req *godap.RunInTerminalRequest) {
 	}
 
 	if err := c.sendRequest(resp); err != nil {
-		log.Printf("[DAP] Failed to send RunInTerminal response: %v", err)
+		c.log("[DAP] Failed to send RunInTerminal response: %v", err)
 		return
 	}
 
@@ -748,7 +783,7 @@ func (c *DapClient) handleRunInTerminal(req *godap.RunInTerminalRequest) {
 func (c *DapClient) connectShell(socketPath string) {
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
-		log.Printf("[DAP] Failed to connect to shell socket: %v", err)
+		c.log("[DAP] Failed to connect to shell socket: %v", err)
 		c.appendToConsole(fmt.Sprintf("[Error] Failed to connect: %v\n", err))
 		c.EvaluatePending = false
 		return
@@ -758,7 +793,7 @@ func (c *DapClient) connectShell(socketPath string) {
 	c.shellConn = conn
 	c.shellMu.Unlock()
 
-	log.Printf("[DAP] Connected to shell socket")
+	c.log("[DAP] Connected to shell socket")
 
 	// Read output continuously
 	buf := make([]byte, 4096)
@@ -772,7 +807,7 @@ func (c *DapClient) connectShell(socketPath string) {
 				c.shellMu.Lock()
 				c.shellReady = true
 				c.shellMu.Unlock()
-				log.Printf("[DAP] Shell ready")
+				c.log("[DAP] Shell ready")
 
 				// Inject a PS1 that resets colors before each prompt.
 				// This prevents colors from "leaking" between commands - if a command
@@ -790,7 +825,7 @@ func (c *DapClient) connectShell(socketPath string) {
 					c.EvaluatePending = false
 					go func() {
 						if err := c.sendShellCommand(cmd); err != nil {
-							log.Printf("[DAP] Failed to send pending command: %v", err)
+							c.log("[DAP] Failed to send pending command: %v", err)
 						}
 					}()
 				}
@@ -801,7 +836,7 @@ func (c *DapClient) connectShell(socketPath string) {
 		}
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("[DAP] Shell read error: %v", err)
+				c.log("[DAP] Shell read error: %v", err)
 			}
 			break
 		}
@@ -812,7 +847,7 @@ func (c *DapClient) connectShell(socketPath string) {
 	c.shellConn = nil
 	c.shellReady = false
 	c.shellMu.Unlock()
-	log.Printf("[DAP] Shell connection closed")
+	c.log("[DAP] Shell connection closed")
 }
 
 // appendToConsole writes text to the console terminal emulator.
@@ -869,12 +904,12 @@ func ensureDockerContainerBuilder(ctx context.Context, dockerCli command.Cli) (s
 
 // runBuildWithHandler runs the Docker build using buildx with the DAP handler.
 func (c *DapClient) runBuildWithHandler() {
-	log.Println("[Build] Starting Docker build with DAP handler...")
+	c.log("[Build] Starting Docker build with DAP handler...")
 
 	// Initialize Docker CLI
 	dockerCli, err := command.NewDockerCli()
 	if err != nil {
-		log.Printf("[Build] Failed to create Docker CLI: %v", err)
+		c.log("[Build] Failed to create Docker CLI: %v", err)
 		return
 	}
 
@@ -884,14 +919,14 @@ func (c *DapClient) runBuildWithHandler() {
 		// Let it auto-detect from environment/config
 		return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	})); err != nil {
-		log.Printf("[Build] Failed to initialize Docker CLI: %v", err)
+		c.log("[Build] Failed to initialize Docker CLI: %v", err)
 		return
 	}
 
 	// Ensure we have a docker-container builder for debugging
 	builderName, err := ensureDockerContainerBuilder(c.ctx, dockerCli)
 	if err != nil {
-		log.Printf("[Build] Failed to ensure docker-container builder: %v", err)
+		c.log("[Build] Failed to ensure docker-container builder: %v", err)
 		return
 	}
 
@@ -911,27 +946,27 @@ func (c *DapClient) runBuildWithHandler() {
 	// Create a progress writer that logs to console
 	printer, err := progress.NewPrinter(c.ctx, io.Discard, progressui.AutoMode)
 	if err != nil {
-		log.Printf("[Build] Failed to create progress printer: %v", err)
+		c.log("[Build] Failed to create progress printer: %v", err)
 		return
 	}
 
 	// Run the build with the DAP handler
-	log.Printf("[Build] Context: %s", buildOpts.ContextPath)
-	log.Printf("[Build] Dockerfile: %s", buildOpts.DockerfileName)
+	c.log("[Build] Context: %s", buildOpts.ContextPath)
+	c.log("[Build] Dockerfile: %s", buildOpts.DockerfileName)
 
 	resp, _, err := commands.RunBuild(c.ctx, dockerCli, buildOpts, nil, printer, &handler)
 	if err != nil {
-		log.Printf("[Build] Build failed: %v", err)
+		c.log("[Build] Build failed: %v", err)
 	} else {
-		log.Printf("[Build] Build completed successfully!")
+		c.log("[Build] Build completed successfully!")
 		if resp != nil {
-			log.Printf("[Build] Image ID: %s", resp.ExporterResponse["containerimage.digest"])
+			c.log("[Build] Image ID: %s", resp.ExporterResponse["containerimage.digest"])
 		}
 	}
 
 	// Wait for printer to finish
 	if err := printer.Wait(); err != nil {
-		log.Printf("[Build] Printer error: %v", err)
+		c.log("[Build] Printer error: %v", err)
 	}
 
 	// Notify UI (only if context is still active)

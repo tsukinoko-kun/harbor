@@ -265,6 +265,10 @@ type DebugView struct {
 	dockerfileHScroll    widget.List        // Horizontal scroll for wide content
 	dockerfileHighlights [][]highlightToken // Syntax highlights per line
 
+	// Log panel state
+	logList   widget.List   // Scrollable list for log entries
+	logEditor widget.Editor // Read-only editor for selectable log text
+
 	// Console state
 	consoleEditor widget.Editor // Single-line input for commands
 	consoleList   widget.List   // Scrollable list for command history
@@ -294,6 +298,11 @@ func NewDebugView(theme *Theme, settings *config.Settings) *DebugView {
 		dockerfileHScroll: widget.List{
 			List: layout.List{
 				Axis: layout.Horizontal,
+			},
+		},
+		logList: widget.List{
+			List: layout.List{
+				Axis: layout.Vertical,
 			},
 		},
 		consoleEditor: widget.Editor{
@@ -645,7 +654,7 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 				return v.layoutDebugButtons(gtx)
 			})
 		}),
-		// Main content area: Dockerfile viewer + Console (horizontal split)
+		// Main content area: Dockerfile viewer + Log/Console (horizontal split)
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				// Dockerfile viewer (left side)
@@ -658,9 +667,24 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 						return layout.Dimensions{}
 					})
 				}),
-				// Console (right side)
+				// Log + Console (right side, vertically split)
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return v.layoutConsole(gtx)
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						// Log panel (top, ~40%)
+						layout.Flexed(0.4, func(gtx layout.Context) layout.Dimensions {
+							return v.layoutLogPanel(gtx)
+						}),
+						// Spacer between log and console
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Dimensions{}
+							})
+						}),
+						// Console (bottom, ~60%)
+						layout.Flexed(0.6, func(gtx layout.Context) layout.Dimensions {
+							return v.layoutConsole(gtx)
+						}),
+					)
 				}),
 			)
 		}),
@@ -1305,4 +1329,86 @@ func (v *DebugView) layoutConsoleInput(gtx layout.Context) layout.Dimensions {
 			)
 		}),
 	)
+}
+
+// layoutLogPanel renders the log panel showing DAP events and debug messages.
+func (v *DebugView) layoutLogPanel(gtx layout.Context) layout.Dimensions {
+	// Render in a card-like container
+	return layout.Stack{}.Layout(gtx,
+		// Background
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			rr := gtx.Dp(unit.Dp(6))
+			rect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Max},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, rect.Op(gtx.Ops))
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		}),
+		// Content
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top:    unit.Dp(8),
+				Bottom: unit.Dp(8),
+				Left:   unit.Dp(8),
+				Right:  unit.Dp(8),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					// Log header
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							label := material.Body2(v.theme.Material, "Log")
+							label.Color = v.theme.Colors.TextMuted
+							return label.Layout(gtx)
+						})
+					}),
+					// Log content (takes remaining space)
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return v.layoutLogContent(gtx)
+					}),
+				)
+			})
+		}),
+	)
+}
+
+// layoutLogContent renders the scrollable log content with selectable text.
+func (v *DebugView) layoutLogContent(gtx layout.Context) layout.Dimensions {
+	if dap.Client == nil {
+		return layout.Dimensions{}
+	}
+
+	logs := dap.Client.GetLogs()
+	if len(logs) == 0 {
+		// Show placeholder when empty
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			label := material.Body2(v.theme.Material, "No log messages yet...")
+			label.Color = v.theme.Colors.TextMuted
+			return label.Layout(gtx)
+		})
+	}
+
+	// Build the full log text for selectable display
+	logText := ""
+	for i, line := range logs {
+		if i > 0 {
+			logText += "\n"
+		}
+		logText += line
+	}
+
+	// Update editor content if it changed
+	currentText := v.logEditor.Text()
+	if currentText != logText {
+		v.logEditor.SetText(logText)
+		// Move cursor to end for auto-scroll effect
+		v.logEditor.SetCaret(len(logText), len(logText))
+	}
+
+	// Use material.Editor for styled text with selection support
+	editor := material.Editor(v.theme.Material, &v.logEditor, "")
+	editor.Font.Typeface = v.theme.MonoTypeface
+	editor.Color = v.theme.Colors.TextSecondary
+	editor.SelectionColor = v.theme.Colors.SelectedBg
+	return editor.Layout(gtx)
 }
