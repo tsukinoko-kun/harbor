@@ -1,16 +1,22 @@
 package ui
 
 import (
+	"context"
+	"fmt"
 	"image"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
 
+	"gio.tools/icons"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"gio.tools/icons"
-
+	"github.com/Masterminds/semver/v3"
 	"github.com/tsukinoko-kun/harbor/internal/models"
 )
 
@@ -29,18 +35,63 @@ type sidebarItem struct {
 	clickable widget.Clickable
 }
 
+func checkBuildxDAPSupport() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "buildx", "version")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	versionStr := string(out)
+	versionStrParts := strings.Split(versionStr, " ")
+	minVersion, err := semver.NewConstraint(">=0.29.0")
+	if err != nil {
+		panic(err)
+	}
+	for _, part := range versionStrParts {
+		if v, ok := strings.CutPrefix(part, "v"); ok {
+			sv, err := semver.NewVersion(v)
+			if err != nil {
+				continue
+			}
+			if minVersion.Check(sv) {
+				return true, nil
+			}
+		} else {
+			sv, err := semver.NewVersion(part)
+			if err != nil {
+				continue
+			}
+			if minVersion.Check(sv) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // NewSidebar creates a new sidebar.
 func NewSidebar(theme *Theme, onSelect func(models.View)) *Sidebar {
+	items := []sidebarItem{
+		{view: models.ViewContainers, icon: icons.ActionViewModule},
+		{view: models.ViewImages, icon: icons.ImageImage},
+		{view: models.ViewVolumes, icon: icons.DeviceStorage},
+		{view: models.ViewNetworks, icon: icons.ActionSettingsEthernet},
+	}
+	if ok, err := checkBuildxDAPSupport(); ok {
+		items = append(items, sidebarItem{view: models.ViewDebug, icon: icons.ActionBugReport})
+	} else {
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error checking buildx support: %v\n", err)
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: debugger is not available because buildx >= 0.29.0 is required\n")
+	}
 	return &Sidebar{
-		theme:    theme,
-		onSelect: onSelect,
-		items: []sidebarItem{
-			{view: models.ViewContainers, icon: icons.ActionViewModule},
-			{view: models.ViewImages, icon: icons.ImageImage},
-			{view: models.ViewVolumes, icon: icons.DeviceStorage},
-			{view: models.ViewNetworks, icon: icons.ActionSettingsEthernet},
-			{view: models.ViewDebug, icon: icons.ActionBugReport},
-		},
+		theme:        theme,
+		onSelect:     onSelect,
+		items:        items,
 		settingsItem: sidebarItem{view: models.ViewSettings, icon: icons.ActionSettings},
 		list: widget.List{
 			List: layout.List{Axis: layout.Vertical},

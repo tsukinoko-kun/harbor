@@ -3,12 +3,14 @@ module github.com/tsukinoko-kun/harbor
 go 1.24.0
 
 require (
+	gio.tools/icons v0.0.0-20240708021058-44790e75e701
 	gioui.org v0.8.0
+	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/docker/docker v27.5.1+incompatible
+	github.com/sqweek/dialog v0.0.0-20240226140203-065105509627
 )
 
 require (
-	gio.tools/icons v0.0.0-20240708021058-44790e75e701 // indirect
 	gioui.org/shader v1.0.8 // indirect
 	github.com/Microsoft/go-winio v0.4.21 // indirect
 	github.com/TheTitanrain/w32 v0.0.0-20180517000239-4f5cfb03fabf // indirect
@@ -28,7 +30,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/sqweek/dialog v0.0.0-20240226140203-065105509627 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.64.0 // indirect
 	go.opentelemetry.io/otel v1.39.0 // indirect
