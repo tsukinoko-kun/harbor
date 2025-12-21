@@ -122,6 +122,13 @@ type DapClient struct {
 	// CurrentLine is the line number from the current stack frame (1-indexed).
 	// This is updated when the debugger stops.
 	CurrentLine int
+	// CurrentEndLine is the end line of the current execution range (1-indexed).
+	// This will be 0 if the DAP server doesn't provide range information.
+	CurrentEndLine int
+	// CurrentColumn is the column number from the current stack frame (1-indexed).
+	CurrentColumn int
+	// CurrentEndColumn is the end column of the current execution range (1-indexed).
+	CurrentEndColumn int
 	// EvaluateResults contains the history of REPL commands and their outputs.
 	EvaluateResults []EvaluateResult
 	// EvaluatePending indicates whether an evaluate request is in-flight.
@@ -563,6 +570,52 @@ func (c *DapClient) SendContinue() error {
 	return c.sendRequest(req)
 }
 
+// SendStepIn sends a DAP stepIn request.
+func (c *DapClient) SendStepIn() error {
+	if !c.Stopped {
+		return nil
+	}
+
+	req := &godap.StepInRequest{
+		Request: godap.Request{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  c.nextSeq(),
+				Type: "request",
+			},
+			Command: "stepIn",
+		},
+		Arguments: godap.StepInArguments{
+			ThreadId: c.StoppedThreadId,
+		},
+	}
+
+	c.Stopped = false
+	return c.sendRequest(req)
+}
+
+// SendStepOut sends a DAP stepOut request.
+func (c *DapClient) SendStepOut() error {
+	if !c.Stopped {
+		return nil
+	}
+
+	req := &godap.StepOutRequest{
+		Request: godap.Request{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  c.nextSeq(),
+				Type: "request",
+			},
+			Command: "stepOut",
+		},
+		Arguments: godap.StepOutArguments{
+			ThreadId: c.StoppedThreadId,
+		},
+	}
+
+	c.Stopped = false
+	return c.sendRequest(req)
+}
+
 // GetStackTrace sends a DAP stackTrace request and updates CurrentLine.
 // This should be called when the debugger is stopped to get the current execution position.
 func (c *DapClient) GetStackTrace() error {
@@ -597,10 +650,18 @@ func (c *DapClient) GetStackTrace() error {
 			return err
 		}
 		if resp, ok := msg.(*godap.StackTraceResponse); ok {
-			// Extract line number from the top stack frame
+			// Extract line and range information from the top stack frame
 			if len(resp.Body.StackFrames) > 0 {
-				c.CurrentLine = resp.Body.StackFrames[0].Line
-				log.Printf("[DAP] Current line: %d", c.CurrentLine)
+				frame := resp.Body.StackFrames[0]
+				c.CurrentLine = frame.Line
+				c.CurrentEndLine = frame.EndLine // Will be 0 if not provided
+				c.CurrentColumn = frame.Column
+				c.CurrentEndColumn = frame.EndColumn // Will be 0 if not provided
+				if c.CurrentEndLine > 0 {
+					log.Printf("[DAP] Current range: lines %d-%d", c.CurrentLine, c.CurrentEndLine)
+				} else {
+					log.Printf("[DAP] Current line: %d", c.CurrentLine)
+				}
 			}
 			return nil
 		}

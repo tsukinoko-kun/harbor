@@ -250,6 +250,8 @@ type DebugView struct {
 
 	// Debug control buttons
 	stepOverButton widget.Clickable
+	stepInButton   widget.Clickable
+	stepOutButton  widget.Clickable
 	continueButton widget.Clickable
 
 	// Dockerfile viewer state
@@ -580,6 +582,16 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 			log.Printf("Failed to step over: %v", err)
 		}
 	}
+	if v.stepInButton.Clicked(gtx) {
+		if err := dap.Client.SendStepIn(); err != nil {
+			log.Printf("Failed to step in: %v", err)
+		}
+	}
+	if v.stepOutButton.Clicked(gtx) {
+		if err := dap.Client.SendStepOut(); err != nil {
+			log.Printf("Failed to step out: %v", err)
+		}
+	}
 	if v.continueButton.Clicked(gtx) {
 		if err := dap.Client.SendContinue(); err != nil {
 			log.Printf("Failed to continue: %v", err)
@@ -679,7 +691,15 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 	}
 
 	currentLine := dap.Client.CurrentLine
+	currentEndLine := dap.Client.CurrentEndLine
 	isStopped := dap.Client.Stopped
+
+	// Determine the effective end line for range highlighting
+	// If EndLine is 0 (not provided), treat it as single-line (same as start)
+	effectiveEndLine := currentEndLine
+	if effectiveEndLine == 0 {
+		effectiveEndLine = currentLine
+	}
 
 	// Calculate width needed for line numbers (based on total lines)
 	lineNumWidth := gtx.Dp(unit.Dp(40))
@@ -710,7 +730,10 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 					// Vertical list of lines - let it size naturally
 					return material.List(v.theme.Material, &v.dockerfileList).Layout(gtx, len(v.dockerfileLines), func(gtx layout.Context, index int) layout.Dimensions {
 						lineNum := index + 1 // 1-indexed
-						isCurrentLine := isStopped && lineNum == currentLine
+
+						// Determine if this line is in the execution range
+						isInRange := isStopped && lineNum >= currentLine && lineNum <= effectiveEndLine
+						isRangeStart := isStopped && lineNum == currentLine
 
 						// Get highlights for this line (if available)
 						var tokens []highlightToken
@@ -718,7 +741,7 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 							tokens = v.dockerfileHighlights[index]
 						}
 
-						return v.layoutDockerfileLine(gtx, lineNum, tokens, isCurrentLine, markerWidth, lineNumWidth)
+						return v.layoutDockerfileLine(gtx, lineNum, tokens, isInRange, isRangeStart, markerWidth, lineNumWidth)
 					})
 				})
 			})
@@ -727,65 +750,92 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 }
 
 // layoutDockerfileLine renders a single line of the Dockerfile with syntax highlighting.
-func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, tokens []highlightToken, isCurrentLine bool, markerWidth, lineNumWidth int) layout.Dimensions {
+// isInRange indicates if this line is within the current execution range.
+// isRangeStart indicates if this is the first line of the range (shows play arrow).
+func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, tokens []highlightToken, isInRange, isRangeStart bool, markerWidth, lineNumWidth int) layout.Dimensions {
 	lineHeight := gtx.Dp(unit.Dp(22))
 
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		// Marker area (play arrow for current line)
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X = markerWidth
-			gtx.Constraints.Max.X = markerWidth
-			gtx.Constraints.Min.Y = lineHeight
-			gtx.Constraints.Max.Y = lineHeight
-
-			if isCurrentLine {
-				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					iconSize := gtx.Dp(unit.Dp(16))
-					gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
-					gtx.Constraints.Max = gtx.Constraints.Min
-					return icons.AVPlayArrow.Layout(gtx, v.theme.Colors.Primary)
-				})
+	// Wrap content in a Stack to draw background highlight for lines in range
+	return layout.Stack{}.Layout(gtx,
+		// Background highlight for lines in execution range
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			if isInRange {
+				// Subtle highlight color based on primary color with low opacity
+				highlightColor := color.NRGBA{
+					R: v.theme.Colors.Primary.R,
+					G: v.theme.Colors.Primary.G,
+					B: v.theme.Colors.Primary.B,
+					A: 30, // Low opacity for subtle highlight
+				}
+				rect := clip.Rect{Max: image.Point{X: gtx.Constraints.Max.X, Y: lineHeight}}
+				paint.FillShape(gtx.Ops, highlightColor, rect.Op())
 			}
-			return layout.Dimensions{Size: image.Point{X: markerWidth, Y: lineHeight}}
+			return layout.Dimensions{Size: image.Point{X: gtx.Constraints.Max.X, Y: lineHeight}}
 		}),
-		// Line number
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X = lineNumWidth
-			gtx.Constraints.Max.X = lineNumWidth
-			gtx.Constraints.Min.Y = lineHeight
-			gtx.Constraints.Max.Y = lineHeight
+		// Line content
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				// Marker area (play arrow for range start)
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = markerWidth
+					gtx.Constraints.Max.X = markerWidth
+					gtx.Constraints.Min.Y = lineHeight
+					gtx.Constraints.Max.Y = lineHeight
 
-			return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					label := material.Body2(v.theme.Material, fmt.Sprintf("%d", lineNum))
-					label.Color = v.theme.Colors.TextMuted
-					return label.Layout(gtx)
-				})
-			})
-		}),
-		// Separator
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				// Draw vertical line separator
-				width := gtx.Dp(unit.Dp(1))
-				rect := clip.Rect{Max: image.Point{X: width, Y: lineHeight}}
-				paint.FillShape(gtx.Ops, v.theme.Colors.Border, rect.Op())
-				return layout.Dimensions{Size: image.Point{X: width, Y: lineHeight}}
-			})
-		}),
-		// Dockerfile content with syntax highlighting
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.Y = lineHeight
-			gtx.Constraints.Max.Y = lineHeight
-			gtx.Constraints.Min.X = 0 // Don't force minimum width
+					if isRangeStart {
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							iconSize := gtx.Dp(unit.Dp(16))
+							gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+							gtx.Constraints.Max = gtx.Constraints.Min
+							return icons.AVPlayArrow.Layout(gtx, v.theme.Colors.Primary)
+						})
+					}
+					return layout.Dimensions{Size: image.Point{X: markerWidth, Y: lineHeight}}
+				}),
+				// Line number
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = lineNumWidth
+					gtx.Constraints.Max.X = lineNumWidth
+					gtx.Constraints.Min.Y = lineHeight
+					gtx.Constraints.Max.Y = lineHeight
 
-			return v.layoutHighlightedContent(gtx, tokens, isCurrentLine)
+					return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							label := material.Body2(v.theme.Material, fmt.Sprintf("%d", lineNum))
+							if isInRange {
+								label.Color = v.theme.Colors.Text // Brighter for lines in range
+							} else {
+								label.Color = v.theme.Colors.TextMuted
+							}
+							return label.Layout(gtx)
+						})
+					})
+				}),
+				// Separator
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						// Draw vertical line separator
+						width := gtx.Dp(unit.Dp(1))
+						rect := clip.Rect{Max: image.Point{X: width, Y: lineHeight}}
+						paint.FillShape(gtx.Ops, v.theme.Colors.Border, rect.Op())
+						return layout.Dimensions{Size: image.Point{X: width, Y: lineHeight}}
+					})
+				}),
+				// Dockerfile content with syntax highlighting
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.Y = lineHeight
+					gtx.Constraints.Max.Y = lineHeight
+					gtx.Constraints.Min.X = 0 // Don't force minimum width
+
+					return v.layoutHighlightedContent(gtx, tokens, isInRange)
+				}),
+			)
 		}),
 	)
 }
 
 // layoutHighlightedContent renders syntax-highlighted tokens as a horizontal layout.
-func (v *DebugView) layoutHighlightedContent(gtx layout.Context, tokens []highlightToken, isCurrentLine bool) layout.Dimensions {
+func (v *DebugView) layoutHighlightedContent(gtx layout.Context, tokens []highlightToken, isInRange bool) layout.Dimensions {
 	if len(tokens) == 0 {
 		return layout.Dimensions{}
 	}
@@ -801,8 +851,8 @@ func (v *DebugView) layoutHighlightedContent(gtx layout.Context, tokens []highli
 			// Get color based on capture type
 			tokenColor := v.getCaptureColor(token.Capture)
 
-			// If this is the current line being debugged, boost the brightness slightly
-			if isCurrentLine {
+			// If this line is in the execution range, boost the brightness slightly
+			if isInRange {
 				tokenColor = brightenColor(tokenColor, 0.15)
 			}
 
@@ -844,12 +894,32 @@ func brightenColor(c color.NRGBA, factor float32) color.NRGBA {
 	}
 }
 
-// layoutDebugButtons renders the step over and continue buttons
+// layoutDebugButtons renders the debug control buttons
 func (v *DebugView) layoutDebugButtons(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceStart}.Layout(gtx,
 		// Step Over button
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return v.layoutDebugButton(gtx, &v.stepOverButton, "Step Over", dap.Client.Stopped)
+		}),
+		// Spacer
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Dimensions{}
+			})
+		}),
+		// Step In button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutDebugButton(gtx, &v.stepInButton, "Step In", dap.Client.Stopped)
+		}),
+		// Spacer
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Dimensions{}
+			})
+		}),
+		// Step Out button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutDebugButton(gtx, &v.stepOutButton, "Step Out", dap.Client.Stopped)
 		}),
 		// Spacer
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
