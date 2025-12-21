@@ -265,6 +265,9 @@ type DebugView struct {
 	// Console state
 	consoleEditor widget.Editor // Single-line input for commands
 	consoleList   widget.List   // Scrollable list for command history
+
+	// Scroll tracking
+	lastScrolledLine int // Track the last line we scrolled to
 }
 
 // NewDebugView creates a new debug view.
@@ -611,6 +614,7 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 		v.dockerfileLines = nil
 		v.dockerfilePath = ""
 		v.dockerfileHighlights = nil
+		v.lastScrolledLine = 0
 		// Return early to avoid accessing the now-nil client
 		return layout.Dimensions{}
 	}
@@ -716,6 +720,18 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 	effectiveEndLine := currentEndLine
 	if effectiveEndLine == 0 {
 		effectiveEndLine = currentLine
+	}
+
+	// Auto-scroll to current execution line when it changes
+	if isStopped && currentLine != v.lastScrolledLine && currentLine > 0 {
+		// Scroll with some context lines above (show ~3 lines before current line)
+		targetLine := currentLine - 4 // 1-indexed to 0-indexed, minus context
+		if targetLine < 0 {
+			targetLine = 0
+		}
+		v.dockerfileList.Position.First = targetLine
+		v.dockerfileList.Position.Offset = 0
+		v.lastScrolledLine = currentLine
 	}
 
 	// Calculate width needed for line numbers (based on total lines)
