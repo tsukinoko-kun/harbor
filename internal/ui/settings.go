@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -141,6 +142,9 @@ func (v *SettingsView) layoutTerminalOptions(gtx layout.Context) []layout.FlexCh
 func (v *SettingsView) layoutTerminalOption(gtx layout.Context, clickable *widget.Clickable, terminal config.Terminal, isSelected bool) layout.Dimensions {
 	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			if clickable.Hovered() {
+				pointer.CursorPointer.Add(gtx.Ops)
+			}
 			return layout.Stack{}.Layout(gtx,
 				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 					bgColor := v.theme.Colors.CardBg

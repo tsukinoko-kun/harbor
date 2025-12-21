@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -169,6 +170,9 @@ func (v *DebugView) layoutFormFieldWithBrowse(gtx layout.Context, label, hint st
 // layoutIconButton renders an icon button for browse actions
 func (v *DebugView) layoutIconButton(gtx layout.Context, clickable *widget.Clickable, icon *widget.Icon) layout.Dimensions {
 	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if clickable.Hovered() {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
 		size := gtx.Dp(unit.Dp(40))
 
 		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
@@ -270,6 +274,9 @@ func (v *DebugView) layoutTextInput(gtx layout.Context, hint string, editor *wid
 // layoutStartButton renders the start debugger button
 func (v *DebugView) layoutStartButton(gtx layout.Context) layout.Dimensions {
 	return v.startButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if v.startButton.Hovered() {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
 		return layout.Stack{}.Layout(gtx,
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				bgColor := v.theme.Colors.Primary

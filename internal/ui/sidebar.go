@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -98,6 +99,9 @@ func (s *Sidebar) layoutItems(gtx layout.Context, currentView models.View) layou
 
 func (s *Sidebar) layoutItem(gtx layout.Context, item *sidebarItem, isActive, isHovered bool) layout.Dimensions {
 	return item.clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if isHovered {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
 		return layout.Inset{
 			Top:    unit.Dp(2),
 			Bottom: unit.Dp(2),

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gioui.org/io/clipboard"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -272,6 +273,9 @@ func (v *ContainersView) layoutError(gtx layout.Context) layout.Dimensions {
 						// Dismiss button
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return v.errorDismiss.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								if v.errorDismiss.Hovered() {
+									pointer.CursorPointer.Add(gtx.Ops)
+								}
 								label := material.Body2(v.theme.Material, "✕")
 								label.Color = v.theme.Colors.ErrorText
 								return label.Layout(gtx)
@@ -599,6 +603,9 @@ func (v *ContainersView) layoutButton(gtx layout.Context, clickable *widget.Clic
 	}
 
 	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if clickable.Hovered() {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
 		return v.layoutButtonContent(gtx, label, isDanger, disabled, clickable.Hovered())
 	})
 }
@@ -768,6 +775,9 @@ func (v *ContainersView) layoutConfirmDialog(gtx layout.Context) layout.Dimensio
 										// Cancel button
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											return v.cancelDelete.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												if v.cancelDelete.Hovered() {
+													pointer.CursorPointer.Add(gtx.Ops)
+												}
 												return v.layoutDialogButton(gtx, "Cancel", false, v.cancelDelete.Hovered())
 											})
 										}),
@@ -775,6 +785,9 @@ func (v *ContainersView) layoutConfirmDialog(gtx layout.Context) layout.Dimensio
 										// Delete button
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											return v.confirmDelete.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												if v.confirmDelete.Hovered() {
+													pointer.CursorPointer.Add(gtx.Ops)
+												}
 												return v.layoutDialogButton(gtx, "Delete", true, v.confirmDelete.Hovered())
 											})
 										}),
