@@ -39,6 +39,30 @@ type Colors struct {
 	SidebarSelectedBg  color.NRGBA
 }
 
+// SyntaxColors defines colors for syntax highlighting.
+type SyntaxColors struct {
+	Keyword     color.NRGBA // FROM, RUN, COPY, etc.
+	String      color.NRGBA // quoted strings
+	Comment     color.NRGBA // # comments
+	Operator    color.NRGBA // : and @
+	Constant    color.NRGBA // ENV variables like $PATH
+	Punctuation color.NRGBA // special punctuation
+	Default     color.NRGBA // fallback/plain text
+}
+
+// DefaultSyntaxColors returns the default syntax highlighting colors (One Dark inspired).
+func DefaultSyntaxColors() SyntaxColors {
+	return SyntaxColors{
+		Keyword:     rgb(0x56b6c2), // Cyan for keywords
+		String:      rgb(0x98c379), // Green for strings
+		Comment:     rgb(0x5c6370), // Gray for comments
+		Operator:    rgb(0xc678dd), // Purple for operators
+		Constant:    rgb(0xd19a66), // Orange for constants
+		Punctuation: rgb(0xe06c75), // Red for special punctuation
+		Default:     rgb(0xabb2bf), // Light gray default
+	}
+}
+
 // DefaultColors returns the default dark color palette.
 func DefaultColors() Colors {
 	return Colors{
@@ -76,6 +100,7 @@ func DefaultColors() Colors {
 type Theme struct {
 	Material *material.Theme
 	Colors   Colors
+	Syntax   SyntaxColors
 }
 
 // NewTheme creates a new application theme.
@@ -94,6 +119,7 @@ func NewTheme() *Theme {
 	return &Theme{
 		Material: th,
 		Colors:   colors,
+		Syntax:   DefaultSyntaxColors(),
 	}
 }
 

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
@@ -40,6 +41,202 @@ func init() {
 	}
 }
 
+// highlightToken represents a syntax-highlighted token within a line.
+type highlightToken struct {
+	Start   int    // byte offset within the line
+	End     int    // byte offset within the line (exclusive)
+	Text    string // the actual text content
+	Capture string // capture name like "keyword", "string", "comment"
+}
+
+// parseDockerfileHighlights parses Dockerfile content and returns syntax highlight tokens per line.
+func parseDockerfileHighlights(content []byte, lines []string) [][]highlightToken {
+	parser := ts.NewParser()
+	defer parser.Close()
+	parser.SetLanguage(tsDockerfileLanguage)
+
+	tree := parser.Parse(content, nil)
+	defer tree.Close()
+
+	cursor := ts.NewQueryCursor()
+	defer cursor.Close()
+
+	captures := cursor.Captures(tsDockerfileQuery, tree.RootNode(), content)
+
+	// Build a map of line -> captures
+	lineCaptures := make(map[int][]highlightToken)
+
+	for match, captureIndex := captures.Next(); match != nil; match, captureIndex = captures.Next() {
+		capture := match.Captures[captureIndex]
+		captureName := tsDockerfileQuery.CaptureNames()[capture.Index]
+
+		// Skip "none" captures
+		if captureName == "none" {
+			continue
+		}
+
+		node := capture.Node
+		startPoint := node.StartPosition()
+		endPoint := node.EndPosition()
+		startByte := node.StartByte()
+		endByte := node.EndByte()
+
+		// Handle single-line captures
+		if startPoint.Row == endPoint.Row {
+			lineNum := int(startPoint.Row)
+			token := highlightToken{
+				Start:   int(startPoint.Column),
+				End:     int(endPoint.Column),
+				Text:    string(content[startByte:endByte]),
+				Capture: captureName,
+			}
+			lineCaptures[lineNum] = append(lineCaptures[lineNum], token)
+		} else {
+			// Handle multi-line captures (e.g., heredocs)
+			for row := startPoint.Row; row <= endPoint.Row; row++ {
+				lineNum := int(row)
+				if lineNum >= len(lines) {
+					continue
+				}
+				line := lines[lineNum]
+
+				var tokenStart, tokenEnd int
+				if row == startPoint.Row {
+					tokenStart = int(startPoint.Column)
+					tokenEnd = len(line)
+				} else if row == endPoint.Row {
+					tokenStart = 0
+					tokenEnd = int(endPoint.Column)
+				} else {
+					tokenStart = 0
+					tokenEnd = len(line)
+				}
+
+				if tokenEnd > len(line) {
+					tokenEnd = len(line)
+				}
+				if tokenStart > tokenEnd {
+					tokenStart = tokenEnd
+				}
+
+				token := highlightToken{
+					Start:   tokenStart,
+					End:     tokenEnd,
+					Text:    line[tokenStart:tokenEnd],
+					Capture: captureName,
+				}
+				lineCaptures[lineNum] = append(lineCaptures[lineNum], token)
+			}
+		}
+	}
+
+	// Convert to slice and fill gaps with default tokens
+	result := make([][]highlightToken, len(lines))
+	for i, line := range lines {
+		captures := lineCaptures[i]
+
+		// Sort captures by start position
+		sortTokens(captures)
+
+		// Merge overlapping/contained captures (later captures win)
+		captures = mergeTokens(captures, line)
+
+		// Fill gaps with default tokens
+		result[i] = fillGaps(captures, line)
+	}
+
+	return result
+}
+
+// sortTokens sorts tokens by start position.
+func sortTokens(tokens []highlightToken) {
+	for i := 1; i < len(tokens); i++ {
+		for j := i; j > 0 && tokens[j].Start < tokens[j-1].Start; j-- {
+			tokens[j], tokens[j-1] = tokens[j-1], tokens[j]
+		}
+	}
+}
+
+// mergeTokens handles overlapping tokens by keeping the most specific (smallest) ones.
+func mergeTokens(tokens []highlightToken, line string) []highlightToken {
+	if len(tokens) == 0 {
+		return tokens
+	}
+
+	// Create a character-level map of which capture applies
+	charCapture := make([]string, len(line))
+	for i := range charCapture {
+		charCapture[i] = ""
+	}
+
+	// Apply captures - later captures in the query order take precedence
+	for _, token := range tokens {
+		for i := token.Start; i < token.End && i < len(charCapture); i++ {
+			charCapture[i] = token.Capture
+		}
+	}
+
+	// Reconstruct tokens from the character map
+	var result []highlightToken
+	i := 0
+	for i < len(line) {
+		capture := charCapture[i]
+		start := i
+
+		// Find the end of this capture span
+		for i < len(line) && charCapture[i] == capture {
+			i++
+		}
+
+		if capture != "" {
+			result = append(result, highlightToken{
+				Start:   start,
+				End:     i,
+				Text:    line[start:i],
+				Capture: capture,
+			})
+		}
+	}
+
+	return result
+}
+
+// fillGaps adds default tokens for unhighlighted text.
+func fillGaps(tokens []highlightToken, line string) []highlightToken {
+	if len(line) == 0 {
+		return nil
+	}
+
+	var result []highlightToken
+	pos := 0
+
+	for _, token := range tokens {
+		// Add gap before this token if needed
+		if token.Start > pos {
+			result = append(result, highlightToken{
+				Start:   pos,
+				End:     token.Start,
+				Text:    line[pos:token.Start],
+				Capture: "", // default/unhighlighted
+			})
+		}
+		result = append(result, token)
+		pos = token.End
+	}
+
+	// Add trailing gap if needed
+	if pos < len(line) {
+		result = append(result, highlightToken{
+			Start:   pos,
+			End:     len(line),
+			Text:    line[pos:],
+			Capture: "", // default/unhighlighted
+		})
+	}
+
+	return result
+}
+
 // DebugView displays debug information and controls.
 type DebugView struct {
 	theme *Theme
@@ -56,9 +253,11 @@ type DebugView struct {
 	continueButton widget.Clickable
 
 	// Dockerfile viewer state
-	dockerfileLines []string    // Cached lines from the Dockerfile
-	dockerfilePath  string      // Path to the currently loaded Dockerfile
-	dockerfileList  widget.List // Scrollable list for Dockerfile lines
+	dockerfileLines      []string           // Cached lines from the Dockerfile
+	dockerfilePath       string             // Path to the currently loaded Dockerfile
+	dockerfileList       widget.List        // Scrollable list for Dockerfile lines (vertical)
+	dockerfileHScroll    widget.List        // Horizontal scroll for wide content
+	dockerfileHighlights [][]highlightToken // Syntax highlights per line
 }
 
 // NewDebugView creates a new debug view.
@@ -76,6 +275,11 @@ func NewDebugView(theme *Theme) *DebugView {
 		dockerfileList: widget.List{
 			List: layout.List{
 				Axis: layout.Vertical,
+			},
+		},
+		dockerfileHScroll: widget.List{
+			List: layout.List{
+				Axis: layout.Horizontal,
 			},
 		},
 	}
@@ -406,22 +610,28 @@ func (v *DebugView) loadDockerfile(path string) {
 
 	v.dockerfilePath = path
 	v.dockerfileLines = nil
+	v.dockerfileHighlights = nil
 
-	file, err := os.Open(path)
+	// Read the entire file content
+	content, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("Failed to open Dockerfile: %v", err)
+		log.Printf("Failed to read Dockerfile: %v", err)
 		return
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	// Split into lines
+	scanner := bufio.NewScanner(bytes.NewReader(content))
 	for scanner.Scan() {
 		v.dockerfileLines = append(v.dockerfileLines, scanner.Text())
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Printf("Failed to read Dockerfile: %v", err)
+		log.Printf("Failed to scan Dockerfile: %v", err)
+		return
 	}
+
+	// Parse syntax highlights
+	v.dockerfileHighlights = parseDockerfileHighlights(content, v.dockerfileLines)
 }
 
 // layoutDockerfile renders the Dockerfile content with line numbers and execution marker.
@@ -459,7 +669,7 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 			paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, rect.Op(gtx.Ops))
 			return layout.Dimensions{Size: gtx.Constraints.Max}
 		}),
-		// Content
+		// Content with horizontal scroll
 		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{
 				Top:    unit.Dp(8),
@@ -467,19 +677,29 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 				Left:   unit.Dp(4),
 				Right:  unit.Dp(8),
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return material.List(v.theme.Material, &v.dockerfileList).Layout(gtx, len(v.dockerfileLines), func(gtx layout.Context, index int) layout.Dimensions {
-					lineNum := index + 1 // 1-indexed
-					isCurrentLine := isStopped && lineNum == currentLine
+				// Horizontal scroll wrapper using layout.List directly for better control
+				return v.dockerfileHScroll.List.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+					// Vertical list of lines - let it size naturally
+					return material.List(v.theme.Material, &v.dockerfileList).Layout(gtx, len(v.dockerfileLines), func(gtx layout.Context, index int) layout.Dimensions {
+						lineNum := index + 1 // 1-indexed
+						isCurrentLine := isStopped && lineNum == currentLine
 
-					return v.layoutDockerfileLine(gtx, lineNum, v.dockerfileLines[index], isCurrentLine, markerWidth, lineNumWidth)
+						// Get highlights for this line (if available)
+						var tokens []highlightToken
+						if index < len(v.dockerfileHighlights) {
+							tokens = v.dockerfileHighlights[index]
+						}
+
+						return v.layoutDockerfileLine(gtx, lineNum, tokens, isCurrentLine, markerWidth, lineNumWidth)
+					})
 				})
 			})
 		}),
 	)
 }
 
-// layoutDockerfileLine renders a single line of the Dockerfile.
-func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, content string, isCurrentLine bool, markerWidth, lineNumWidth int) layout.Dimensions {
+// layoutDockerfileLine renders a single line of the Dockerfile with syntax highlighting.
+func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, tokens []highlightToken, isCurrentLine bool, markerWidth, lineNumWidth int) layout.Dimensions {
 	lineHeight := gtx.Dp(unit.Dp(22))
 
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
@@ -525,23 +745,75 @@ func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, conten
 				return layout.Dimensions{Size: image.Point{X: width, Y: lineHeight}}
 			})
 		}),
-		// Dockerfile content
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		// Dockerfile content with syntax highlighting
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.Y = lineHeight
 			gtx.Constraints.Max.Y = lineHeight
+			gtx.Constraints.Min.X = 0 // Don't force minimum width
 
-			return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				label := material.Body2(v.theme.Material, content)
-				label.Font.Weight = font.Medium
-				if isCurrentLine {
-					label.Color = v.theme.Colors.Text
-				} else {
-					label.Color = v.theme.Colors.TextMuted
-				}
-				return label.Layout(gtx)
-			})
+			return v.layoutHighlightedContent(gtx, tokens, isCurrentLine)
 		}),
 	)
+}
+
+// layoutHighlightedContent renders syntax-highlighted tokens as a horizontal layout.
+func (v *DebugView) layoutHighlightedContent(gtx layout.Context, tokens []highlightToken, isCurrentLine bool) layout.Dimensions {
+	if len(tokens) == 0 {
+		return layout.Dimensions{}
+	}
+
+	// Build layout children for each token
+	children := make([]layout.FlexChild, len(tokens))
+	for i, token := range tokens {
+		token := token // capture for closure
+		children[i] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			label := material.Body2(v.theme.Material, token.Text)
+			label.Font.Weight = font.Medium
+
+			// Get color based on capture type
+			tokenColor := v.getCaptureColor(token.Capture)
+
+			// If this is the current line being debugged, boost the brightness slightly
+			if isCurrentLine {
+				tokenColor = brightenColor(tokenColor, 0.15)
+			}
+
+			label.Color = tokenColor
+			return label.Layout(gtx)
+		})
+	}
+
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+}
+
+// getCaptureColor returns the appropriate color for a syntax capture name.
+func (v *DebugView) getCaptureColor(capture string) color.NRGBA {
+	switch capture {
+	case "keyword":
+		return v.theme.Syntax.Keyword
+	case "string":
+		return v.theme.Syntax.String
+	case "comment":
+		return v.theme.Syntax.Comment
+	case "operator":
+		return v.theme.Syntax.Operator
+	case "constant":
+		return v.theme.Syntax.Constant
+	case "punctuation.special":
+		return v.theme.Syntax.Punctuation
+	default:
+		return v.theme.Syntax.Default
+	}
+}
+
+// brightenColor increases the brightness of a color by the given factor (0-1).
+func brightenColor(c color.NRGBA, factor float32) color.NRGBA {
+	return color.NRGBA{
+		R: uint8(min(255, float32(c.R)*(1+factor))),
+		G: uint8(min(255, float32(c.G)*(1+factor))),
+		B: uint8(min(255, float32(c.B)*(1+factor))),
+		A: c.A,
+	}
 }
 
 // layoutDebugButtons renders the step over and continue buttons
