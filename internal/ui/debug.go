@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 
+	"gio.tools/icons"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -11,7 +12,6 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
-	"gio.tools/icons"
 	"github.com/sqweek/dialog"
 
 	"github.com/tsukinoko-kun/harbor/internal/dap"

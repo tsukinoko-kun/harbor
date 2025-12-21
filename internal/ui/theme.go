@@ -10,30 +10,30 @@ import (
 
 // Colors defines the color palette for the application.
 type Colors struct {
-	Background      color.NRGBA
-	Surface         color.NRGBA
-	SidebarBg       color.NRGBA
-	SidebarActive   color.NRGBA
-	SidebarHover    color.NRGBA
-	Text            color.NRGBA
-	TextSecondary   color.NRGBA
-	TextMuted       color.NRGBA
-	Border          color.NRGBA
-	StatusRunning   color.NRGBA
-	StatusStopped   color.NRGBA
-	StatusPaused    color.NRGBA
-	StatusCreated   color.NRGBA
-	Accent          color.NRGBA
-	Primary         color.NRGBA
-	GroupHeader     color.NRGBA
-	CardBg          color.NRGBA
-	SelectedBg      color.NRGBA
-	ButtonBg        color.NRGBA
-	ButtonHover     color.NRGBA
-	ButtonDanger     color.NRGBA
-	ButtonDangerHov  color.NRGBA
-	ErrorBg          color.NRGBA
-	ErrorText        color.NRGBA
+	Background         color.NRGBA
+	Surface            color.NRGBA
+	SidebarBg          color.NRGBA
+	SidebarActive      color.NRGBA
+	SidebarHover       color.NRGBA
+	Text               color.NRGBA
+	TextSecondary      color.NRGBA
+	TextMuted          color.NRGBA
+	Border             color.NRGBA
+	StatusRunning      color.NRGBA
+	StatusStopped      color.NRGBA
+	StatusPaused       color.NRGBA
+	StatusCreated      color.NRGBA
+	Accent             color.NRGBA
+	Primary            color.NRGBA
+	GroupHeader        color.NRGBA
+	CardBg             color.NRGBA
+	SelectedBg         color.NRGBA
+	ButtonBg           color.NRGBA
+	ButtonHover        color.NRGBA
+	ButtonDanger       color.NRGBA
+	ButtonDangerHov    color.NRGBA
+	ErrorBg            color.NRGBA
+	ErrorText          color.NRGBA
 	SidebarIconDefault color.NRGBA
 	SidebarIconActive  color.NRGBA
 	SidebarSelectedBg  color.NRGBA
@@ -42,28 +42,28 @@ type Colors struct {
 // DefaultColors returns the default dark color palette.
 func DefaultColors() Colors {
 	return Colors{
-		Background:      rgb(0x1a1a1a),
-		Surface:         rgb(0x242424),
-		SidebarBg:       rgb(0x1e1e1e),
-		SidebarActive:   rgb(0x2d2d2d),
-		SidebarHover:    rgb(0x333333),
-		Text:            rgb(0xffffff),
-		TextSecondary:   rgb(0xb0b0b0),
-		TextMuted:       rgb(0x707070),
-		Border:          rgb(0x3d3d3d),
-		StatusRunning:   rgb(0x4ade80), // Green
-		StatusStopped:   rgb(0xf87171), // Red
-		StatusPaused:    rgb(0xfbbf24), // Yellow
-		StatusCreated:   rgb(0x9ca3af), // Gray
-		Accent:          rgb(0x818cf8), // Indigo
-		Primary:         rgb(0x818cf8), // Indigo (primary color)
-		GroupHeader:     rgb(0x2a2a2a),
-		CardBg:          rgb(0x2a2a2a),
-		SelectedBg:      rgb(0x312e81), // Dark indigo for selection
-		ButtonBg:        rgb(0x3d3d3d),
-		ButtonHover:     rgb(0x4d4d4d),
-		ButtonDanger:    rgb(0xdc2626), // Red
-		ButtonDangerHov: rgb(0xef4444), // Lighter red
+		Background:         rgb(0x1a1a1a),
+		Surface:            rgb(0x242424),
+		SidebarBg:          rgb(0x1e1e1e),
+		SidebarActive:      rgb(0x2d2d2d),
+		SidebarHover:       rgb(0x333333),
+		Text:               rgb(0xffffff),
+		TextSecondary:      rgb(0xb0b0b0),
+		TextMuted:          rgb(0x707070),
+		Border:             rgb(0x3d3d3d),
+		StatusRunning:      rgb(0x4ade80), // Green
+		StatusStopped:      rgb(0xf87171), // Red
+		StatusPaused:       rgb(0xfbbf24), // Yellow
+		StatusCreated:      rgb(0x9ca3af), // Gray
+		Accent:             rgb(0x818cf8), // Indigo
+		Primary:            rgb(0x818cf8), // Indigo (primary color)
+		GroupHeader:        rgb(0x2a2a2a),
+		CardBg:             rgb(0x2a2a2a),
+		SelectedBg:         rgb(0x312e81), // Dark indigo for selection
+		ButtonBg:           rgb(0x3d3d3d),
+		ButtonHover:        rgb(0x4d4d4d),
+		ButtonDanger:       rgb(0xdc2626), // Red
+		ButtonDangerHov:    rgb(0xef4444), // Lighter red
 		ErrorBg:            rgb(0x7f1d1d), // Dark red background
 		ErrorText:          rgb(0xfecaca), // Light red text
 		SidebarIconDefault: rgb(0x9ca3af), // Gray for non-selected icons
