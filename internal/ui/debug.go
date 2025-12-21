@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"log"
 	"path/filepath"
 
 	"gio.tools/icons"
@@ -88,7 +89,13 @@ func (v *DebugView) layoutStartForm(gtx layout.Context) layout.Dimensions {
 			Dockerfile: v.dockerfileEditor.Text(),
 			Context:    v.contextEditor.Text(),
 		}
-		dap.Client = dap.NewClient(params)
+		client, err := dap.NewClient(params)
+		if err != nil {
+			// TODO: Show error in UI
+			log.Printf("Failed to start debugger: %v", err)
+		} else {
+			dap.Client = client
+		}
 	}
 
 	// Handle dockerfile browse button click
