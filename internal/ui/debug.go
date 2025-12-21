@@ -1,20 +1,45 @@
 package ui
 
 import (
+	"image"
+	"image/color"
+
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"gio.tools/icons"
+	"github.com/sqweek/dialog"
+
+	"github.com/tsukinoko-kun/harbor/internal/dap"
 )
 
-// DebugView displays debug information.
+// DebugView displays debug information and controls.
 type DebugView struct {
 	theme *Theme
+
+	// Form state for start phase
+	dockerfileEditor       widget.Editor
+	dockerfileBrowseButton widget.Clickable
+	contextEditor          widget.Editor
+	contextBrowseButton    widget.Clickable
+	startButton            widget.Clickable
 }
 
 // NewDebugView creates a new debug view.
 func NewDebugView(theme *Theme) *DebugView {
 	return &DebugView{
 		theme: theme,
+		dockerfileEditor: widget.Editor{
+			SingleLine: true,
+			Submit:     true,
+		},
+		contextEditor: widget.Editor{
+			SingleLine: true,
+			Submit:     true,
+		},
 	}
 }
 
@@ -25,15 +50,16 @@ func (v *DebugView) Layout(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return v.layoutHeader(gtx)
 		}),
-		// Content
+		// Content - depends on whether debugger is running
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{
 				Left:  unit.Dp(16),
 				Right: unit.Dp(16),
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				label := material.Body1(v.theme.Material, "debug")
-				label.Color = v.theme.Colors.Text
-				return label.Layout(gtx)
+				if dap.Client != nil {
+					return v.layoutRunning(gtx)
+				}
+				return v.layoutStartForm(gtx)
 			})
 		}),
 	)
@@ -50,4 +76,267 @@ func (v *DebugView) layoutHeader(gtx layout.Context) layout.Dimensions {
 		title.Color = v.theme.Colors.Text
 		return title.Layout(gtx)
 	})
+}
+
+// layoutStartForm shows the form to configure and start the debugger
+func (v *DebugView) layoutStartForm(gtx layout.Context) layout.Dimensions {
+	// Handle start button click
+	if v.startButton.Clicked(gtx) {
+		params := dap.DebugParams{
+			Dockerfile: v.dockerfileEditor.Text(),
+			Context:    v.contextEditor.Text(),
+		}
+		dap.Client = dap.NewClient(params)
+	}
+
+	// Handle dockerfile browse button click
+	if v.dockerfileBrowseButton.Clicked(gtx) {
+		go func() {
+			filename, err := dialog.File().Title("Select Dockerfile").Load()
+			if err == nil {
+				v.dockerfileEditor.SetText(filename)
+			}
+		}()
+	}
+
+	// Handle context browse button click
+	if v.contextBrowseButton.Clicked(gtx) {
+		go func() {
+			directory, err := dialog.Directory().Title("Select Build Context").Browse()
+			if err == nil {
+				v.contextEditor.SetText(directory)
+			}
+		}()
+	}
+
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// Description
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				label := material.Body1(v.theme.Material, "Configure the debugger to step through your Dockerfile build process.")
+				label.Color = v.theme.Colors.TextMuted
+				return label.Layout(gtx)
+			})
+		}),
+		// Dockerfile input
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutFormFieldWithBrowse(gtx, "Dockerfile", "Path to Dockerfile (e.g., ./Dockerfile)", &v.dockerfileEditor, &v.dockerfileBrowseButton, icons.EditorInsertDriveFile)
+		}),
+		// Context input
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return v.layoutFormFieldWithBrowse(gtx, "Build Context", "Context directory (e.g., .)", &v.contextEditor, &v.contextBrowseButton, icons.FileFolderOpen)
+			})
+		}),
+		// Start button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return v.layoutStartButton(gtx)
+			})
+		}),
+	)
+}
+
+// layoutFormFieldWithBrowse renders a labeled text input field with a browse button
+func (v *DebugView) layoutFormFieldWithBrowse(gtx layout.Context, label, hint string, editor *widget.Editor, browseButton *widget.Clickable, icon *widget.Icon) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// Label
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(v.theme.Material, label)
+				l.Color = v.theme.Colors.Text
+				return l.Layout(gtx)
+			})
+		}),
+		// Input field with browse button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				// Browse button
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return v.layoutIconButton(gtx, browseButton, icon)
+					})
+				}),
+				// Input field
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return v.layoutTextInput(gtx, hint, editor)
+				}),
+			)
+		}),
+	)
+}
+
+// layoutIconButton renders an icon button for browse actions
+func (v *DebugView) layoutIconButton(gtx layout.Context, clickable *widget.Clickable, icon *widget.Icon) layout.Dimensions {
+	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		size := gtx.Dp(unit.Dp(40))
+
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				bgColor := v.theme.Colors.CardBg
+				if clickable.Hovered() {
+					bgColor = v.theme.Colors.ButtonHover
+				}
+
+				rr := gtx.Dp(unit.Dp(6))
+				rect := clip.RRect{
+					Rect: image.Rectangle{Max: image.Point{X: size, Y: size}},
+					NE:   rr, NW: rr, SE: rr, SW: rr,
+				}
+				paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+
+				// Border
+				borderWidth := gtx.Dp(unit.Dp(1))
+				borderRect := clip.RRect{
+					Rect: image.Rectangle{Max: image.Point{X: size, Y: size}},
+					NE:   rr, NW: rr, SE: rr, SW: rr,
+				}
+				paint.FillShape(gtx.Ops, v.theme.Colors.Border, borderRect.Op(gtx.Ops))
+
+				// Inner fill
+				innerRect := clip.RRect{
+					Rect: image.Rectangle{
+						Min: image.Point{X: borderWidth, Y: borderWidth},
+						Max: image.Point{X: size - borderWidth, Y: size - borderWidth},
+					},
+					NE: rr - borderWidth, NW: rr - borderWidth, SE: rr - borderWidth, SW: rr - borderWidth,
+				}
+				innerColor := v.theme.Colors.CardBg
+				if clickable.Hovered() {
+					innerColor = v.theme.Colors.ButtonHover
+				}
+				paint.FillShape(gtx.Ops, innerColor, innerRect.Op(gtx.Ops))
+
+				return layout.Dimensions{Size: image.Point{X: size, Y: size}}
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				iconSize := gtx.Dp(unit.Dp(20))
+				gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+				gtx.Constraints.Max = gtx.Constraints.Min
+				return icon.Layout(gtx, v.theme.Colors.Text)
+			}),
+		)
+	})
+}
+
+// layoutTextInput renders a styled text input
+func (v *DebugView) layoutTextInput(gtx layout.Context, hint string, editor *widget.Editor) layout.Dimensions {
+	// Card background with border
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			rr := gtx.Dp(unit.Dp(6))
+			rect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Min},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, rect.Op(gtx.Ops))
+
+			// Border
+			borderWidth := gtx.Dp(unit.Dp(1))
+			borderRect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Min},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, v.theme.Colors.Border, borderRect.Op(gtx.Ops))
+
+			// Inner fill (slightly smaller to show border)
+			innerRect := clip.RRect{
+				Rect: image.Rectangle{
+					Min: image.Point{X: borderWidth, Y: borderWidth},
+					Max: image.Point{X: gtx.Constraints.Min.X - borderWidth, Y: gtx.Constraints.Min.Y - borderWidth},
+				},
+				NE: rr - borderWidth, NW: rr - borderWidth, SE: rr - borderWidth, SW: rr - borderWidth,
+			}
+			paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, innerRect.Op(gtx.Ops))
+
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top:    unit.Dp(12),
+				Bottom: unit.Dp(12),
+				Left:   unit.Dp(12),
+				Right:  unit.Dp(12),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				e := material.Editor(v.theme.Material, editor, hint)
+				e.Color = v.theme.Colors.Text
+				e.HintColor = v.theme.Colors.TextMuted
+				return e.Layout(gtx)
+			})
+		}),
+	)
+}
+
+// layoutStartButton renders the start debugger button
+func (v *DebugView) layoutStartButton(gtx layout.Context) layout.Dimensions {
+	return v.startButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				bgColor := v.theme.Colors.Primary
+				if v.startButton.Hovered() {
+					// Slightly lighter on hover
+					bgColor = lightenColor(bgColor, 0.1)
+				}
+
+				rr := gtx.Dp(unit.Dp(6))
+				rect := clip.RRect{
+					Rect: image.Rectangle{Max: gtx.Constraints.Min},
+					NE:   rr, NW: rr, SE: rr, SW: rr,
+				}
+				paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{
+					Top:    unit.Dp(12),
+					Bottom: unit.Dp(12),
+					Left:   unit.Dp(24),
+					Right:  unit.Dp(24),
+				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body1(v.theme.Material, "Start Debugger")
+					label.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+					return label.Layout(gtx)
+				})
+			}),
+		)
+	})
+}
+
+// layoutRunning shows the running debugger view
+func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				label := material.Body1(v.theme.Material, "Debugger is running...")
+				label.Color = v.theme.Colors.Text
+				return label.Layout(gtx)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				params := dap.Client.Params
+				label := material.Body2(v.theme.Material, "Dockerfile: "+params.Dockerfile)
+				label.Color = v.theme.Colors.TextMuted
+				return label.Layout(gtx)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				params := dap.Client.Params
+				label := material.Body2(v.theme.Material, "Context: "+params.Context)
+				label.Color = v.theme.Colors.TextMuted
+				return label.Layout(gtx)
+			})
+		}),
+	)
+}
+
+// lightenColor adjusts a color to be lighter by the given factor (0-1)
+func lightenColor(c color.NRGBA, factor float32) color.NRGBA {
+	return color.NRGBA{
+		R: uint8(float32(c.R) + (255-float32(c.R))*factor),
+		G: uint8(float32(c.G) + (255-float32(c.G))*factor),
+		B: uint8(float32(c.B) + (255-float32(c.B))*factor),
+		A: c.A,
+	}
 }
