@@ -26,6 +26,8 @@ RUN ls -la
 RUN pwd
 
 FROM alpine:latest
+RUN whoami
+RUN ls -la
 COPY --from=0 /app/text.txt /app/text.txt
 RUN cat /app/text.txt
 RUN whoami

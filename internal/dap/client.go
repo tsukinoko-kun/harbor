@@ -244,9 +244,9 @@ func (c *DapClient) Close() {
 	if c.clientConn != nil {
 		_ = c.clientConn.Close()
 	}
-	if c.UpdateChan != nil {
-		close(c.UpdateChan)
-	}
+	// Note: We don't close UpdateChan here because background goroutines
+	// may still try to send on it. The channel will be garbage collected
+	// when the client is no longer referenced.
 }
 
 // nextSeq returns the next sequence number for DAP messages.
@@ -981,8 +981,10 @@ func (c *DapClient) runBuildWithHandler() {
 		log.Printf("[Build] Printer error: %v", err)
 	}
 
-	// Notify UI
+	// Notify UI (only if context is still active)
 	select {
+	case <-c.ctx.Done():
+		// Context cancelled, don't try to send
 	case c.UpdateChan <- struct{}{}:
 	default:
 	}

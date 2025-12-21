@@ -253,6 +253,7 @@ type DebugView struct {
 	stepInButton   widget.Clickable
 	stepOutButton  widget.Clickable
 	continueButton widget.Clickable
+	stopButton     widget.Clickable
 
 	// Dockerfile viewer state
 	dockerfileLines      []string           // Cached lines from the Dockerfile
@@ -576,6 +577,11 @@ func (v *DebugView) layoutStartButton(gtx layout.Context) layout.Dimensions {
 
 // layoutRunning shows the running debugger view
 func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
+	// Guard against nil client (can happen if stop button was just clicked)
+	if dap.Client == nil {
+		return layout.Dimensions{}
+	}
+
 	// Handle button clicks
 	if v.stepOverButton.Clicked(gtx) {
 		if err := dap.Client.SendNext(); err != nil {
@@ -596,6 +602,17 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 		if err := dap.Client.SendContinue(); err != nil {
 			log.Printf("Failed to continue: %v", err)
 		}
+	}
+	if v.stopButton.Clicked(gtx) {
+		log.Printf("Stopping debugger...")
+		dap.Client.Close()
+		dap.Client = nil
+		// Clear cached Dockerfile content so it reloads on next debug session
+		v.dockerfileLines = nil
+		v.dockerfilePath = ""
+		v.dockerfileHighlights = nil
+		// Return early to avoid accessing the now-nil client
+		return layout.Dimensions{}
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -897,85 +914,138 @@ func brightenColor(c color.NRGBA, factor float32) color.NRGBA {
 // layoutDebugButtons renders the debug control buttons
 func (v *DebugView) layoutDebugButtons(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceStart}.Layout(gtx,
-		// Step Over button
+		// Continue button
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return v.layoutDebugButton(gtx, &v.stepOverButton, "Step Over", dap.Client.Stopped)
+			return v.layoutDebugIconButton(gtx, &v.continueButton, icons.AVPlayArrow, dap.Client.Stopped)
 		}),
 		// Spacer
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Dimensions{}
+			})
+		}),
+		// Step Over button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutDebugIconButton(gtx, &v.stepOverButton, icons.AVSkipNext, dap.Client.Stopped)
+		}),
+		// Spacer
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Dimensions{}
 			})
 		}),
 		// Step In button
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return v.layoutDebugButton(gtx, &v.stepInButton, "Step In", dap.Client.Stopped)
+			return v.layoutDebugIconButton(gtx, &v.stepInButton, icons.NavigationArrowDownward, dap.Client.Stopped)
 		}),
 		// Spacer
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Dimensions{}
 			})
 		}),
 		// Step Out button
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return v.layoutDebugButton(gtx, &v.stepOutButton, "Step Out", dap.Client.Stopped)
+			return v.layoutDebugIconButton(gtx, &v.stepOutButton, icons.NavigationArrowUpward, dap.Client.Stopped)
 		}),
 		// Spacer
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Dimensions{}
 			})
 		}),
-		// Continue button
+		// Stop button (always enabled when debugger is running)
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return v.layoutDebugButton(gtx, &v.continueButton, "Continue", dap.Client.Stopped)
+			return v.layoutStopButton(gtx, &v.stopButton, icons.AVStop)
 		}),
 	)
 }
 
-// layoutDebugButton renders a single debug control button
-func (v *DebugView) layoutDebugButton(gtx layout.Context, clickable *widget.Clickable, text string, enabled bool) layout.Dimensions {
+// layoutStopButton renders the stop button (gray normally, red on hover)
+func (v *DebugView) layoutStopButton(gtx layout.Context, clickable *widget.Clickable, icon *widget.Icon) layout.Dimensions {
+	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if clickable.Hovered() {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
+
+		size := gtx.Dp(unit.Dp(36))
+		isHovered := clickable.Hovered()
+
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				var bgColor color.NRGBA
+				if isHovered {
+					bgColor = v.theme.Colors.ButtonDanger
+				} else {
+					bgColor = v.theme.Colors.ButtonBg
+				}
+
+				rr := gtx.Dp(unit.Dp(6))
+				rect := clip.RRect{
+					Rect: image.Rectangle{Max: image.Point{X: size, Y: size}},
+					NE:   rr, NW: rr, SE: rr, SW: rr,
+				}
+				paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+				return layout.Dimensions{Size: image.Point{X: size, Y: size}}
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				iconSize := gtx.Dp(unit.Dp(20))
+				gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+				gtx.Constraints.Max = gtx.Constraints.Min
+
+				var iconColor color.NRGBA
+				if isHovered {
+					iconColor = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+				} else {
+					iconColor = v.theme.Colors.Text
+				}
+				return icon.Layout(gtx, iconColor)
+			}),
+		)
+	})
+}
+
+// layoutDebugIconButton renders a single debug control button with an icon
+func (v *DebugView) layoutDebugIconButton(gtx layout.Context, clickable *widget.Clickable, icon *widget.Icon, enabled bool) layout.Dimensions {
 	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if enabled && clickable.Hovered() {
 			pointer.CursorPointer.Add(gtx.Ops)
 		}
 
-		return layout.Stack{}.Layout(gtx,
+		size := gtx.Dp(unit.Dp(36))
+
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				var bgColor color.NRGBA
 				if !enabled {
-					// Disabled state - muted color
+					// Disabled state - darker muted color
 					bgColor = v.theme.Colors.CardBg
 				} else if clickable.Hovered() {
-					bgColor = lightenColor(v.theme.Colors.Primary, 0.1)
+					bgColor = v.theme.Colors.ButtonHover
 				} else {
-					bgColor = v.theme.Colors.Primary
+					bgColor = v.theme.Colors.ButtonBg
 				}
 
 				rr := gtx.Dp(unit.Dp(6))
 				rect := clip.RRect{
-					Rect: image.Rectangle{Max: gtx.Constraints.Min},
+					Rect: image.Rectangle{Max: image.Point{X: size, Y: size}},
 					NE:   rr, NW: rr, SE: rr, SW: rr,
 				}
 				paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
-				return layout.Dimensions{Size: gtx.Constraints.Min}
+				return layout.Dimensions{Size: image.Point{X: size, Y: size}}
 			}),
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{
-					Top:    unit.Dp(10),
-					Bottom: unit.Dp(10),
-					Left:   unit.Dp(16),
-					Right:  unit.Dp(16),
-				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					label := material.Body2(v.theme.Material, text)
-					if enabled {
-						label.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-					} else {
-						label.Color = v.theme.Colors.TextMuted
-					}
-					return label.Layout(gtx)
-				})
+				iconSize := gtx.Dp(unit.Dp(20))
+				gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+				gtx.Constraints.Max = gtx.Constraints.Min
+
+				var iconColor color.NRGBA
+				if enabled {
+					iconColor = v.theme.Colors.Text
+				} else {
+					iconColor = v.theme.Colors.TextMuted
+				}
+				return icon.Layout(gtx, iconColor)
 			}),
 		)
 	})
