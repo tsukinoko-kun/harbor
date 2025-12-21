@@ -8,7 +8,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"gioui.org/widget/material"
+	"gio.tools/icons"
 
 	"github.com/tsukinoko-kun/harbor/internal/models"
 )
@@ -24,7 +24,7 @@ type Sidebar struct {
 
 type sidebarItem struct {
 	view      models.View
-	label     string
+	icon      *widget.Icon
 	clickable widget.Clickable
 }
 
@@ -34,13 +34,13 @@ func NewSidebar(theme *Theme, onSelect func(models.View)) *Sidebar {
 		theme:    theme,
 		onSelect: onSelect,
 		items: []sidebarItem{
-			{view: models.ViewContainers, label: "Containers"},
-			{view: models.ViewImages, label: "Images"},
-			{view: models.ViewVolumes, label: "Volumes"},
-			{view: models.ViewNetworks, label: "Networks"},
-			{view: models.ViewDebug, label: "Debug"},
+			{view: models.ViewContainers, icon: icons.ActionViewModule},
+			{view: models.ViewImages, icon: icons.ImageImage},
+			{view: models.ViewVolumes, icon: icons.DeviceStorage},
+			{view: models.ViewNetworks, icon: icons.ActionSettingsEthernet},
+			{view: models.ViewDebug, icon: icons.ActionBugReport},
 		},
-		settingsItem: sidebarItem{view: models.ViewSettings, label: "Settings"},
+		settingsItem: sidebarItem{view: models.ViewSettings, icon: icons.ActionSettings},
 		list: widget.List{
 			List: layout.List{Axis: layout.Vertical},
 		},
@@ -102,15 +102,21 @@ func (s *Sidebar) layoutItem(gtx layout.Context, item *sidebarItem, isActive, is
 			Top:    unit.Dp(2),
 			Bottom: unit.Dp(2),
 		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			// Background
+			// Background: selected = dark indigo (no hover change), hover = gray, default = sidebar bg
 			var bgColor = s.theme.Colors.SidebarBg
 			if isActive {
-				bgColor = s.theme.Colors.SidebarActive
+				bgColor = s.theme.Colors.SidebarSelectedBg
 			} else if isHovered {
 				bgColor = s.theme.Colors.SidebarHover
 			}
 
-			return layout.Stack{}.Layout(gtx,
+			// Icon color: indigo when selected, gray otherwise
+			iconColor := s.theme.Colors.SidebarIconDefault
+			if isActive {
+				iconColor = s.theme.Colors.SidebarIconActive
+			}
+
+			return layout.Stack{Alignment: layout.Center}.Layout(gtx,
 				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 					// Rounded rectangle background
 					rr := gtx.Dp(unit.Dp(6))
@@ -125,36 +131,14 @@ func (s *Sidebar) layoutItem(gtx layout.Context, item *sidebarItem, isActive, is
 					return layout.Inset{
 						Top:    unit.Dp(10),
 						Bottom: unit.Dp(10),
-						Left:   unit.Dp(12),
-						Right:  unit.Dp(12),
+						Left:   unit.Dp(10),
+						Right:  unit.Dp(10),
 					}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							// Active indicator
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if isActive {
-									size := gtx.Dp(unit.Dp(6))
-									circle := clip.Ellipse{
-										Min: image.Point{},
-										Max: image.Point{X: size, Y: size},
-									}
-									paint.FillShape(gtx.Ops, s.theme.Colors.Accent, circle.Op(gtx.Ops))
-									return layout.Dimensions{Size: image.Point{X: size, Y: size}}
-								}
-								return layout.Dimensions{Size: image.Point{X: gtx.Dp(unit.Dp(6)), Y: 0}}
-							}),
-							// Spacing
-							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-							// Label
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								label := material.Body1(s.theme.Material, item.label)
-								if isActive {
-									label.Color = s.theme.Colors.Text
-								} else {
-									label.Color = s.theme.Colors.TextSecondary
-								}
-								return label.Layout(gtx)
-							}),
-						)
+						// Render centered icon
+						iconSize := gtx.Dp(unit.Dp(24))
+						gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+						gtx.Constraints.Max = gtx.Constraints.Min
+						return item.icon.Layout(gtx, iconColor)
 					})
 				}),
 			)

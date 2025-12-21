@@ -191,8 +191,8 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				// Sidebar
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Dp(unit.Dp(200))
-					gtx.Constraints.Max.X = gtx.Dp(unit.Dp(200))
+					gtx.Constraints.Min.X = gtx.Dp(unit.Dp(60))
+					gtx.Constraints.Max.X = gtx.Dp(unit.Dp(60))
 					return a.layoutSidebar(gtx)
 				}),
 				// Divider

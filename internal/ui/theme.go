@@ -30,10 +30,13 @@ type Colors struct {
 	SelectedBg      color.NRGBA
 	ButtonBg        color.NRGBA
 	ButtonHover     color.NRGBA
-	ButtonDanger    color.NRGBA
-	ButtonDangerHov color.NRGBA
-	ErrorBg         color.NRGBA
-	ErrorText       color.NRGBA
+	ButtonDanger     color.NRGBA
+	ButtonDangerHov  color.NRGBA
+	ErrorBg          color.NRGBA
+	ErrorText        color.NRGBA
+	SidebarIconDefault color.NRGBA
+	SidebarIconActive  color.NRGBA
+	SidebarSelectedBg  color.NRGBA
 }
 
 // DefaultColors returns the default dark color palette.
@@ -61,8 +64,11 @@ func DefaultColors() Colors {
 		ButtonHover:     rgb(0x4d4d4d),
 		ButtonDanger:    rgb(0xdc2626), // Red
 		ButtonDangerHov: rgb(0xef4444), // Lighter red
-		ErrorBg:         rgb(0x7f1d1d), // Dark red background
-		ErrorText:       rgb(0xfecaca), // Light red text
+		ErrorBg:            rgb(0x7f1d1d), // Dark red background
+		ErrorText:          rgb(0xfecaca), // Light red text
+		SidebarIconDefault: rgb(0x9ca3af), // Gray for non-selected icons
+		SidebarIconActive:  rgb(0x818cf8), // Indigo for selected icons
+		SidebarSelectedBg:  rgb(0x312e81), // Dark indigo background for selected
 	}
 }
 
