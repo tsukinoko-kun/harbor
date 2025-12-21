@@ -23,6 +23,7 @@ import (
 
 	ts "github.com/tree-sitter/go-tree-sitter"
 	"github.com/tsukinoko-kun/harbor/internal/dap"
+	"github.com/tsukinoko-kun/harbor/internal/terminal"
 	ts_dockerfile "github.com/tsukinoko-kun/harbor/internal/treesitter/dockerfile"
 )
 
@@ -1141,14 +1142,14 @@ func (v *DebugView) layoutConsole(gtx layout.Context) layout.Dimensions {
 	)
 }
 
-// layoutConsoleHistory renders the console output as a terminal-style view.
+// layoutConsoleHistory renders the console output as a terminal-style view with ANSI colors.
 func (v *DebugView) layoutConsoleHistory(gtx layout.Context) layout.Dimensions {
-	if dap.Client == nil {
+	if dap.Client == nil || dap.Client.Console == nil {
 		return layout.Dimensions{}
 	}
 
-	output := dap.Client.ConsoleOutput.Text
-	if output == "" {
+	numLines := dap.Client.Console.Lines()
+	if numLines == 0 {
 		// Show placeholder when empty
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			label := material.Body2(v.theme.Material, "Type a command below...")
@@ -1160,34 +1161,71 @@ func (v *DebugView) layoutConsoleHistory(gtx layout.Context) layout.Dimensions {
 	// Auto-scroll to bottom
 	v.consoleList.Position.BeforeEnd = false
 
-	// Split output into lines for rendering
-	lines := splitLines(output)
-
-	return material.List(v.theme.Material, &v.consoleList).Layout(gtx, len(lines), func(gtx layout.Context, index int) layout.Dimensions {
-		label := material.Body2(v.theme.Material, lines[index])
-		label.Color = v.theme.Colors.TextSecondary
-		return label.Layout(gtx)
+	return material.List(v.theme.Material, &v.consoleList).Layout(gtx, numLines, func(gtx layout.Context, index int) layout.Dimensions {
+		spans := dap.Client.Console.GetLineSpans(index)
+		return v.layoutTerminalLine(gtx, spans)
 	})
 }
 
-// splitLines splits a string into lines, preserving empty lines.
-func splitLines(s string) []string {
-	if s == "" {
-		return nil
+// layoutTerminalLine renders a single line of terminal output with styled spans.
+func (v *DebugView) layoutTerminalLine(gtx layout.Context, spans []terminal.StyledSpan) layout.Dimensions {
+	if len(spans) == 0 {
+		// Empty line - return minimal height
+		lineHeight := gtx.Dp(unit.Dp(18))
+		return layout.Dimensions{Size: image.Point{Y: lineHeight}}
 	}
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
+
+	// Build layout children for each styled span
+	children := make([]layout.FlexChild, len(spans))
+	for i, span := range spans {
+		span := span // capture for closure
+		children[i] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			label := material.Body2(v.theme.Material, span.Text)
+			label.Font.Typeface = v.theme.MonoTypeface // Use monospace font
+			label.Color = v.styleToColor(span.Style)
+			if span.Style.Bold {
+				label.Font.Weight = font.Bold
+			}
+			if span.Style.Italic {
+				label.Font.Style = font.Italic
+			}
+			return label.Layout(gtx)
+		})
+	}
+
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+}
+
+// styleToColor converts a terminal.Style to a color.NRGBA for rendering.
+func (v *DebugView) styleToColor(style terminal.Style) color.NRGBA {
+	// Default colors for the terminal
+	defaultFg := v.theme.Colors.TextSecondary
+	defaultBg := color.NRGBA{A: 0} // Transparent
+
+	fg := style.Fg.ToNRGBA(defaultFg)
+	bg := style.Bg.ToNRGBA(defaultBg)
+
+	// Handle reverse video
+	if style.Reverse {
+		fg, bg = bg, fg
+		if bg.A == 0 {
+			bg = v.theme.Colors.CardBg
 		}
 	}
-	// Add the last line if there's remaining content
-	if start < len(s) {
-		lines = append(lines, s[start:])
+
+	// Handle dim (reduce brightness)
+	if style.Dim {
+		fg.R = fg.R / 2
+		fg.G = fg.G / 2
+		fg.B = fg.B / 2
 	}
-	return lines
+
+	// Hidden text
+	if style.Hidden {
+		fg = bg
+	}
+
+	return fg
 }
 
 // layoutConsoleInput renders the input box for entering commands.
@@ -1235,6 +1273,7 @@ func (v *DebugView) layoutConsoleInput(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						label := material.Body2(v.theme.Material, ">")
+						label.Font.Typeface = v.theme.MonoTypeface
 						label.Color = v.theme.Colors.Primary
 						label.Font.Weight = font.Bold
 						return label.Layout(gtx)
@@ -1253,6 +1292,7 @@ func (v *DebugView) layoutConsoleInput(gtx layout.Context) layout.Dimensions {
 							hint = "Waiting for response..."
 						}
 						e := material.Editor(v.theme.Material, &v.consoleEditor, hint)
+						e.Font.Typeface = v.theme.MonoTypeface
 						e.Color = v.theme.Colors.Text
 						e.HintColor = v.theme.Colors.TextMuted
 						return e.Layout(gtx)

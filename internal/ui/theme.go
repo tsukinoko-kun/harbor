@@ -98,9 +98,10 @@ func DefaultColors() Colors {
 
 // Theme holds the application theme including colors and material theme.
 type Theme struct {
-	Material *material.Theme
-	Colors   Colors
-	Syntax   SyntaxColors
+	Material      *material.Theme
+	Colors        Colors
+	Syntax        SyntaxColors
+	MonoTypeface  font.Typeface // Monospace font for terminal output
 }
 
 // NewTheme creates a new application theme.
@@ -117,9 +118,10 @@ func NewTheme() *Theme {
 	th.ContrastFg = colors.Text
 
 	return &Theme{
-		Material: th,
-		Colors:   colors,
-		Syntax:   DefaultSyntaxColors(),
+		Material:     th,
+		Colors:       colors,
+		Syntax:       DefaultSyntaxColors(),
+		MonoTypeface: "monospace", // Generic monospace font family
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/docker/docker/client"
 	godap "github.com/google/go-dap"
 	"github.com/moby/buildkit/util/progress/progressui"
+	"github.com/tsukinoko-kun/harbor/internal/terminal"
 )
 
 // DebugParams contains the parameters for starting a debug session.
@@ -95,11 +96,9 @@ func (c *pipeConn) Close() error {
 	return c.conn.Close()
 }
 
-// ConsoleOutput holds accumulated shell output for the console.
-type ConsoleOutput struct {
-	// Text is the accumulated output from the shell.
-	Text string
-}
+// ConsoleTerminal is the terminal emulator for the debug console.
+// It processes ANSI escape sequences for color and cursor movement.
+type ConsoleTerminal = terminal.Terminal
 
 // DapClient is the debug adapter protocol client.
 // It manages the connection to a DAP server and provides
@@ -125,8 +124,9 @@ type DapClient struct {
 	CurrentColumn int
 	// CurrentEndColumn is the end column of the current execution range (1-indexed).
 	CurrentEndColumn int
-	// ConsoleOutput contains the accumulated shell output.
-	ConsoleOutput ConsoleOutput
+	// Console is the terminal emulator for shell output.
+	// It processes ANSI escape sequences for color and cursor movement.
+	Console *terminal.Terminal
 	// EvaluatePending indicates whether an evaluate request is in-flight.
 	EvaluatePending bool
 	// pendingExpression stores the expression being evaluated.
@@ -188,6 +188,7 @@ func NewClient(params DebugParams) (*DapClient, error) {
 	c := &DapClient{
 		Params:       params,
 		UpdateChan:   make(chan struct{}),
+		Console:      terminal.New(),
 		ctx:          ctx,
 		cancel:       cancel,
 		clientConn:   clientConn,
@@ -470,13 +471,8 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		// Check if this is a response to an evaluate request
 		if m.Command == "evaluate" && c.EvaluatePending {
 			c.EvaluatePending = false
-			// Append error message to console output
-			c.ConsoleOutput.Text += fmt.Sprintf("\n[Error] %s\n", m.Message)
-			// Notify UI that data changed
-			select {
-			case c.UpdateChan <- struct{}{}:
-			default:
-			}
+			// Append error message to console output (red color)
+			c.appendToConsole(fmt.Sprintf("\n\x1b[31m[Error] %s\x1b[0m\n", m.Message))
 		}
 
 	case *godap.RunInTerminalRequest:
@@ -690,6 +686,13 @@ func (c *DapClient) sendShellCommand(command string) error {
 		return fmt.Errorf("no shell connection")
 	}
 
+	// Reset terminal style before new command output.
+	// Many shell commands (like ls --color, grep --color) output ANSI color codes
+	// but don't always send a reset sequence (\x1b[0m) when they finish.
+	// Without this reset, the next command's output would inherit the previous
+	// command's styling, causing colors to "leak" between commands.
+	c.Console.ResetStyle()
+
 	log.Printf("[DAP] Sending to shell: %s", command)
 	_, err := conn.Write([]byte(command + "\n"))
 	return err
@@ -800,14 +803,10 @@ func (c *DapClient) connectShell(socketPath string) {
 	log.Printf("[DAP] Shell connection closed")
 }
 
-// appendToConsole appends text to the console output.
-// It strips carriage returns since we display line-by-line.
+// appendToConsole writes text to the console terminal emulator.
+// The terminal handles ANSI escape sequences for colors and cursor movement.
 func (c *DapClient) appendToConsole(chunk string) {
-	// Strip carriage returns - they're used for cursor positioning in terminals
-	// but we display line-by-line so they just cause issues
-	chunk = strings.ReplaceAll(chunk, "\r", "")
-
-	c.ConsoleOutput.Text += chunk
+	c.Console.Write([]byte(chunk))
 	select {
 	case c.UpdateChan <- struct{}{}:
 	default:
