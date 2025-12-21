@@ -100,6 +100,11 @@ type DapClient struct {
 	// UpdateChan is used to signal the UI that data has changed.
 	// Send to this channel when the DAP server sends new data.
 	UpdateChan chan struct{}
+	// Stopped indicates whether the debugger is currently paused.
+	Stopped bool
+	// StoppedThreadId is the thread ID from the last StoppedEvent,
+	// needed for Next/Continue requests.
+	StoppedThreadId int
 
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -266,7 +271,7 @@ func (c *DapClient) sendLaunch() error {
 		Dockerfile:  c.Params.Dockerfile,
 		ContextPath: c.Params.Context,
 		Config: common.Config{
-			StopOnEntry: false,
+			StopOnEntry: true,
 		},
 	}
 
@@ -392,6 +397,8 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 
 	case *godap.StoppedEvent:
 		log.Printf("[DAP] Stopped: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
+		c.Stopped = true
+		c.StoppedThreadId = m.Body.ThreadId
 		// Notify UI that data changed
 		select {
 		case c.UpdateChan <- struct{}{}:
@@ -403,6 +410,12 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 
 	case *godap.ContinuedEvent:
 		log.Printf("[DAP] Continued: threadId=%d", m.Body.ThreadId)
+		c.Stopped = false
+		// Notify UI that data changed
+		select {
+		case c.UpdateChan <- struct{}{}:
+		default:
+		}
 
 	case *godap.BreakpointEvent:
 		log.Printf("[DAP] Breakpoint event: reason=%s", m.Body.Reason)
@@ -414,6 +427,52 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		// Log unknown events for debugging
 		log.Printf("[DAP] Event: %T", msg)
 	}
+}
+
+// SendNext sends a DAP next (step over) request.
+func (c *DapClient) SendNext() error {
+	if !c.Stopped {
+		return nil
+	}
+
+	req := &godap.NextRequest{
+		Request: godap.Request{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  c.nextSeq(),
+				Type: "request",
+			},
+			Command: "next",
+		},
+		Arguments: godap.NextArguments{
+			ThreadId: c.StoppedThreadId,
+		},
+	}
+
+	c.Stopped = false
+	return c.sendRequest(req)
+}
+
+// SendContinue sends a DAP continue request.
+func (c *DapClient) SendContinue() error {
+	if !c.Stopped {
+		return nil
+	}
+
+	req := &godap.ContinueRequest{
+		Request: godap.Request{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  c.nextSeq(),
+				Type: "request",
+			},
+			Command: "continue",
+		},
+		Arguments: godap.ContinueArguments{
+			ThreadId: c.StoppedThreadId,
+		},
+	}
+
+	c.Stopped = false
+	return c.sendRequest(req)
 }
 
 // runBuildWithHandler runs the Docker build using buildx with the DAP handler.

@@ -29,6 +29,10 @@ type DebugView struct {
 	contextEditor          widget.Editor
 	contextBrowseButton    widget.Clickable
 	startButton            widget.Clickable
+
+	// Debug control buttons
+	stepOverButton  widget.Clickable
+	continueButton  widget.Clickable
 }
 
 // NewDebugView creates a new debug view.
@@ -322,14 +326,34 @@ func (v *DebugView) layoutStartButton(gtx layout.Context) layout.Dimensions {
 
 // layoutRunning shows the running debugger view
 func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
+	// Handle button clicks
+	if v.stepOverButton.Clicked(gtx) {
+		if err := dap.Client.SendNext(); err != nil {
+			log.Printf("Failed to step over: %v", err)
+		}
+	}
+	if v.continueButton.Clicked(gtx) {
+		if err := dap.Client.SendContinue(); err != nil {
+			log.Printf("Failed to continue: %v", err)
+		}
+	}
+
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// Status message
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				label := material.Body1(v.theme.Material, "Debugger is running...")
+				var statusText string
+				if dap.Client.Stopped {
+					statusText = "Debugger paused"
+				} else {
+					statusText = "Debugger running..."
+				}
+				label := material.Body1(v.theme.Material, statusText)
 				label.Color = v.theme.Colors.Text
 				return label.Layout(gtx)
 			})
 		}),
+		// Dockerfile info
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				params := dap.Client.Params
@@ -338,6 +362,7 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 				return label.Layout(gtx)
 			})
 		}),
+		// Context info
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				params := dap.Client.Params
@@ -346,7 +371,80 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 				return label.Layout(gtx)
 			})
 		}),
+		// Debug control buttons
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return v.layoutDebugButtons(gtx)
+			})
+		}),
 	)
+}
+
+// layoutDebugButtons renders the step over and continue buttons
+func (v *DebugView) layoutDebugButtons(gtx layout.Context) layout.Dimensions {
+	return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceStart}.Layout(gtx,
+		// Step Over button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutDebugButton(gtx, &v.stepOverButton, "Step Over", dap.Client.Stopped)
+		}),
+		// Spacer
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Dimensions{}
+			})
+		}),
+		// Continue button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutDebugButton(gtx, &v.continueButton, "Continue", dap.Client.Stopped)
+		}),
+	)
+}
+
+// layoutDebugButton renders a single debug control button
+func (v *DebugView) layoutDebugButton(gtx layout.Context, clickable *widget.Clickable, text string, enabled bool) layout.Dimensions {
+	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if enabled && clickable.Hovered() {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
+
+		return layout.Stack{}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				var bgColor color.NRGBA
+				if !enabled {
+					// Disabled state - muted color
+					bgColor = v.theme.Colors.CardBg
+				} else if clickable.Hovered() {
+					bgColor = lightenColor(v.theme.Colors.Primary, 0.1)
+				} else {
+					bgColor = v.theme.Colors.Primary
+				}
+
+				rr := gtx.Dp(unit.Dp(6))
+				rect := clip.RRect{
+					Rect: image.Rectangle{Max: gtx.Constraints.Min},
+					NE:   rr, NW: rr, SE: rr, SW: rr,
+				}
+				paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{
+					Top:    unit.Dp(10),
+					Bottom: unit.Dp(10),
+					Left:   unit.Dp(16),
+					Right:  unit.Dp(16),
+				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body2(v.theme.Material, text)
+					if enabled {
+						label.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+					} else {
+						label.Color = v.theme.Colors.TextMuted
+					}
+					return label.Layout(gtx)
+				})
+			}),
+		)
+	})
 }
 
 // lightenColor adjusts a color to be lighter by the given factor (0-1)
