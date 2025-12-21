@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"path/filepath"
 
 	"gio.tools/icons"
 	"gioui.org/io/pointer"
@@ -96,6 +97,9 @@ func (v *DebugView) layoutStartForm(gtx layout.Context) layout.Dimensions {
 			filename, err := dialog.File().Title("Select Dockerfile").Load()
 			if err == nil {
 				v.dockerfileEditor.SetText(filename)
+				if v.contextEditor.Text() == "" {
+					v.contextEditor.SetText(filepath.Dir(filename))
+				}
 			}
 		}()
 	}

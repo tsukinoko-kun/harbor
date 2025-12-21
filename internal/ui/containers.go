@@ -165,14 +165,7 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 	}
 
 	if len(groups) == 0 {
-		return layout.Stack{}.Layout(gtx,
-			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-				return v.layoutEmpty(gtx)
-			}),
-			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				return v.layoutConfirmDialog(gtx)
-			}),
-		)
+		return v.layoutEmpty(gtx)
 	}
 
 	// Flatten groups into items for the list
