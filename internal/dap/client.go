@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -94,6 +95,16 @@ func (c *pipeConn) Close() error {
 	return c.conn.Close()
 }
 
+// EvaluateResult holds the result of an evaluate request (REPL command).
+type EvaluateResult struct {
+	// Expression is the command that was executed.
+	Expression string
+	// Result is the output from the command.
+	Result string
+	// Success indicates whether the command succeeded.
+	Success bool
+}
+
 // DapClient is the debug adapter protocol client.
 // It manages the connection to a DAP server and provides
 // a channel for notifying the UI of updates.
@@ -111,6 +122,12 @@ type DapClient struct {
 	// CurrentLine is the line number from the current stack frame (1-indexed).
 	// This is updated when the debugger stops.
 	CurrentLine int
+	// EvaluateResults contains the history of REPL commands and their outputs.
+	EvaluateResults []EvaluateResult
+	// EvaluatePending indicates whether an evaluate request is in-flight.
+	EvaluatePending bool
+	// pendingExpression stores the expression being evaluated.
+	pendingExpression string
 
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -118,6 +135,11 @@ type DapClient struct {
 	clientReader *bufio.Reader
 	adapter      *buildxdap.Adapter[LaunchConfig]
 	seq          int64
+
+	// Shell session state
+	shellConn  net.Conn   // Persistent connection to the shell
+	shellMu    sync.Mutex // Protects shellConn
+	shellReady bool       // True when shell is ready for commands
 }
 
 // Client is the global DAP client instance.
@@ -246,8 +268,11 @@ func (c *DapClient) sendInitialize() error {
 			Command: "initialize",
 		},
 		Arguments: godap.InitializeRequestArguments{
-			ClientID:   "harbor",
-			ClientName: "Harbor",
+			ClientID:                     "harbor",
+			ClientName:                   "Harbor",
+			LinesStartAt1:                true,
+			ColumnsStartAt1:              true,
+			SupportsRunInTerminalRequest: true,
 		},
 	}
 
@@ -401,6 +426,17 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		}
 		log.Printf("[DAP] Output [%s]: %s", category, m.Body.Output)
 
+		// If we have a pending evaluate, append output to the result
+		if c.EvaluatePending && len(c.EvaluateResults) > 0 {
+			idx := len(c.EvaluateResults) - 1
+			c.EvaluateResults[idx].Result += m.Body.Output
+			// Notify UI of the update
+			select {
+			case c.UpdateChan <- struct{}{}:
+			default:
+			}
+		}
+
 	case *godap.StoppedEvent:
 		log.Printf("[DAP] Stopped: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
 		c.Stopped = true
@@ -433,9 +469,51 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 	case *godap.InitializedEvent:
 		log.Println("[DAP] Initialized event received")
 
+	case *godap.EvaluateResponse:
+		log.Printf("[DAP] Evaluate response: success=%v, result=%q", m.Success, m.Body.Result)
+		c.EvaluatePending = false
+
+		// Update the last result in the history
+		if len(c.EvaluateResults) > 0 {
+			idx := len(c.EvaluateResults) - 1
+			c.EvaluateResults[idx].Result = m.Body.Result
+			c.EvaluateResults[idx].Success = m.Success
+			if !m.Success && m.Message != "" {
+				c.EvaluateResults[idx].Result = m.Message
+			}
+		}
+
+		// Notify UI that data changed
+		select {
+		case c.UpdateChan <- struct{}{}:
+		default:
+		}
+
+	case *godap.ErrorResponse:
+		log.Printf("[DAP] Error response: command=%s, message=%s", m.Command, m.Message)
+		// Check if this is a response to an evaluate request
+		if m.Command == "evaluate" && c.EvaluatePending {
+			c.EvaluatePending = false
+			if len(c.EvaluateResults) > 0 {
+				idx := len(c.EvaluateResults) - 1
+				c.EvaluateResults[idx].Result = m.Message
+				c.EvaluateResults[idx].Success = false
+			}
+			// Notify UI that data changed
+			select {
+			case c.UpdateChan <- struct{}{}:
+			default:
+			}
+		}
+
+	case *godap.RunInTerminalRequest:
+		// Server is asking us to run a command in a terminal
+		log.Printf("[DAP] RunInTerminal request: args=%v, cwd=%s", m.Arguments.Args, m.Arguments.Cwd)
+		c.handleRunInTerminal(m)
+
 	default:
-		// Log unknown events for debugging
-		log.Printf("[DAP] Event: %T", msg)
+		// Log unknown messages for debugging
+		log.Printf("[DAP] Unhandled message: %T %+v", msg, msg)
 	}
 }
 
@@ -526,7 +604,210 @@ func (c *DapClient) GetStackTrace() error {
 			}
 			return nil
 		}
-		// Continue reading (might get events first)
+		// Handle other messages that might come in while waiting
+		c.handleMessage(msg)
+	}
+}
+
+// SendEvaluate sends a shell command to execute in the build container.
+func (c *DapClient) SendEvaluate(expression string) error {
+	// Add to results immediately
+	c.EvaluateResults = append(c.EvaluateResults, EvaluateResult{
+		Expression: expression,
+		Result:     "",
+		Success:    true,
+	})
+
+	// Notify UI
+	select {
+	case c.UpdateChan <- struct{}{}:
+	default:
+	}
+
+	c.shellMu.Lock()
+	hasShell := c.shellConn != nil && c.shellReady
+	c.shellMu.Unlock()
+
+	// If we have an active shell, send command directly
+	if hasShell {
+		return c.sendShellCommand(expression)
+	}
+
+	// Otherwise, open a shell session first
+	if c.EvaluatePending {
+		return fmt.Errorf("command already in progress")
+	}
+
+	c.EvaluatePending = true
+	c.pendingExpression = expression
+
+	// Send "exec" to open the shell
+	seq := c.nextSeq()
+	req := &godap.EvaluateRequest{
+		Request: godap.Request{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  seq,
+				Type: "request",
+			},
+			Command: "evaluate",
+		},
+		Arguments: godap.EvaluateArguments{
+			Expression: "exec",
+			Context:    "repl",
+		},
+	}
+
+	log.Printf("[DAP] Opening shell session, then will run: %q", expression)
+
+	err := c.sendRequest(req)
+	if err != nil {
+		log.Printf("[DAP] Failed to send exec request: %v", err)
+	}
+	return err
+}
+
+// sendShellCommand sends a command to the active shell session.
+func (c *DapClient) sendShellCommand(command string) error {
+	c.shellMu.Lock()
+	conn := c.shellConn
+	c.shellMu.Unlock()
+
+	if conn == nil {
+		return fmt.Errorf("no shell connection")
+	}
+
+	log.Printf("[DAP] Sending to shell: %s", command)
+	_, err := conn.Write([]byte(command + "\n"))
+	return err
+}
+
+// handleRunInTerminal handles a RunInTerminalRequest from the DAP server.
+// The buildx DAP uses this to set up exec sessions via Unix sockets.
+func (c *DapClient) handleRunInTerminal(req *godap.RunInTerminalRequest) {
+	log.Printf("[DAP] RunInTerminal request: kind=%s, args=%v", req.Arguments.Kind, req.Arguments.Args)
+
+	// Look for socket path in args (format: "harbor dap attach <socket>")
+	var socketPath string
+	for i, arg := range req.Arguments.Args {
+		if arg == "attach" && i+1 < len(req.Arguments.Args) {
+			socketPath = req.Arguments.Args[i+1]
+			break
+		}
+	}
+
+	// Send acknowledgment response
+	resp := &godap.RunInTerminalResponse{
+		Response: godap.Response{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  c.nextSeq(),
+				Type: "response",
+			},
+			RequestSeq: req.Seq,
+			Success:    true,
+			Command:    "runInTerminal",
+		},
+		Body: godap.RunInTerminalResponseBody{},
+	}
+
+	if err := c.sendRequest(resp); err != nil {
+		log.Printf("[DAP] Failed to send RunInTerminal response: %v", err)
+		return
+	}
+
+	// Connect to the shell socket
+	if socketPath != "" {
+		c.shellMu.Lock()
+		if c.shellConn == nil {
+			go c.connectShell(socketPath)
+		}
+		c.shellMu.Unlock()
+	}
+}
+
+// connectShell connects to the shell socket and maintains a persistent connection.
+func (c *DapClient) connectShell(socketPath string) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		log.Printf("[DAP] Failed to connect to shell socket: %v", err)
+		c.updateLastResult(fmt.Sprintf("Failed to connect: %v", err), false)
+		c.EvaluatePending = false
+		return
+	}
+
+	c.shellMu.Lock()
+	c.shellConn = conn
+	c.shellMu.Unlock()
+
+	log.Printf("[DAP] Connected to shell socket")
+
+	// Read output continuously
+	buf := make([]byte, 4096)
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			chunk := string(buf[:n])
+
+			// Check if shell is ready (prompt received)
+			if !c.shellReady && (strings.Contains(chunk, "# ") || strings.Contains(chunk, "$ ")) {
+				c.shellMu.Lock()
+				c.shellReady = true
+				c.shellMu.Unlock()
+				log.Printf("[DAP] Shell ready")
+
+				// If we have a pending command, send it now
+				if c.pendingExpression != "" {
+					cmd := c.pendingExpression
+					c.pendingExpression = ""
+					c.EvaluatePending = false
+					go func() {
+						if err := c.sendShellCommand(cmd); err != nil {
+							log.Printf("[DAP] Failed to send pending command: %v", err)
+						}
+					}()
+				}
+			} else {
+				// Update the current result
+				c.appendToLastResult(chunk)
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("[DAP] Shell read error: %v", err)
+			}
+			break
+		}
+	}
+
+	// Clean up
+	c.shellMu.Lock()
+	c.shellConn = nil
+	c.shellReady = false
+	c.shellMu.Unlock()
+	log.Printf("[DAP] Shell connection closed")
+}
+
+// updateLastResult sets the result of the last evaluate entry.
+func (c *DapClient) updateLastResult(result string, success bool) {
+	if len(c.EvaluateResults) > 0 {
+		idx := len(c.EvaluateResults) - 1
+		c.EvaluateResults[idx].Result = result
+		c.EvaluateResults[idx].Success = success
+	}
+	select {
+	case c.UpdateChan <- struct{}{}:
+	default:
+	}
+}
+
+// appendToLastResult appends to the result of the last evaluate entry.
+func (c *DapClient) appendToLastResult(chunk string) {
+	if len(c.EvaluateResults) > 0 {
+		idx := len(c.EvaluateResults) - 1
+		c.EvaluateResults[idx].Result += chunk
+	}
+	select {
+	case c.UpdateChan <- struct{}{}:
+	default:
 	}
 }
 

@@ -258,6 +258,10 @@ type DebugView struct {
 	dockerfileList       widget.List        // Scrollable list for Dockerfile lines (vertical)
 	dockerfileHScroll    widget.List        // Horizontal scroll for wide content
 	dockerfileHighlights [][]highlightToken // Syntax highlights per line
+
+	// Console state
+	consoleEditor widget.Editor // Single-line input for commands
+	consoleList   widget.List   // Scrollable list for command history
 }
 
 // NewDebugView creates a new debug view.
@@ -280,6 +284,15 @@ func NewDebugView(theme *Theme) *DebugView {
 		dockerfileHScroll: widget.List{
 			List: layout.List{
 				Axis: layout.Horizontal,
+			},
+		},
+		consoleEditor: widget.Editor{
+			SingleLine: true,
+			Submit:     true,
+		},
+		consoleList: widget.List{
+			List: layout.List{
+				Axis: layout.Vertical,
 			},
 		},
 	}
@@ -594,9 +607,24 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 				return v.layoutDebugButtons(gtx)
 			})
 		}),
-		// Dockerfile viewer (takes remaining space)
+		// Main content area: Dockerfile viewer + Console (horizontal split)
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return v.layoutDockerfile(gtx)
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				// Dockerfile viewer (left side)
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return v.layoutDockerfile(gtx)
+				}),
+				// Spacer between panels
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Left: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Dimensions{}
+					})
+				}),
+				// Console (right side)
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return v.layoutConsole(gtx)
+				}),
+			)
 		}),
 	)
 }
@@ -891,4 +919,214 @@ func lightenColor(c color.NRGBA, factor float32) color.NRGBA {
 		B: uint8(float32(c.B) + (255-float32(c.B))*factor),
 		A: c.A,
 	}
+}
+
+// layoutConsole renders the REPL-style console panel.
+func (v *DebugView) layoutConsole(gtx layout.Context) layout.Dimensions {
+	// Handle console input submission
+	for {
+		event, ok := v.consoleEditor.Update(gtx)
+		if !ok {
+			break
+		}
+		if _, ok := event.(widget.SubmitEvent); ok {
+			text := v.consoleEditor.Text()
+			if text != "" && dap.Client != nil && !dap.Client.EvaluatePending {
+				if err := dap.Client.SendEvaluate(text); err != nil {
+					log.Printf("Failed to send evaluate: %v", err)
+				}
+				v.consoleEditor.SetText("")
+			}
+		}
+	}
+
+	// Render in a card-like container
+	return layout.Stack{}.Layout(gtx,
+		// Background
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			rr := gtx.Dp(unit.Dp(6))
+			rect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Max},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, rect.Op(gtx.Ops))
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		}),
+		// Content
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top:    unit.Dp(8),
+				Bottom: unit.Dp(8),
+				Left:   unit.Dp(8),
+				Right:  unit.Dp(8),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					// Console header
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							label := material.Body2(v.theme.Material, "Console")
+							label.Color = v.theme.Colors.TextMuted
+							return label.Layout(gtx)
+						})
+					}),
+					// Command history (takes remaining space)
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return v.layoutConsoleHistory(gtx)
+					}),
+					// Input box at bottom
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return v.layoutConsoleInput(gtx)
+						})
+					}),
+				)
+			})
+		}),
+	)
+}
+
+// layoutConsoleHistory renders the scrollable list of command/output pairs.
+func (v *DebugView) layoutConsoleHistory(gtx layout.Context) layout.Dimensions {
+	if dap.Client == nil {
+		return layout.Dimensions{}
+	}
+
+	results := dap.Client.EvaluateResults
+	if len(results) == 0 {
+		// Show placeholder when empty
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			label := material.Body2(v.theme.Material, "Type a command below...")
+			label.Color = v.theme.Colors.TextMuted
+			return label.Layout(gtx)
+		})
+	}
+
+	// Auto-scroll to bottom when new entries are added
+	v.consoleList.Position.BeforeEnd = false
+
+	return material.List(v.theme.Material, &v.consoleList).Layout(gtx, len(results), func(gtx layout.Context, index int) layout.Dimensions {
+		return v.layoutConsoleEntry(gtx, results[index], index == len(results)-1 && dap.Client.EvaluatePending)
+	})
+}
+
+// layoutConsoleEntry renders a single command/output pair.
+func (v *DebugView) layoutConsoleEntry(gtx layout.Context, entry dap.EvaluateResult, isPending bool) layout.Dimensions {
+	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			// Command line with prompt
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					// Prompt
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						label := material.Body2(v.theme.Material, "> ")
+						label.Color = v.theme.Colors.Primary
+						label.Font.Weight = font.Bold
+						return label.Layout(gtx)
+					}),
+					// Command text
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						label := material.Body2(v.theme.Material, entry.Expression)
+						label.Color = v.theme.Colors.Text
+						return label.Layout(gtx)
+					}),
+				)
+			}),
+			// Output (if available)
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if isPending {
+					// Show loading indicator
+					return layout.Inset{Left: unit.Dp(16), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						label := material.Body2(v.theme.Material, "...")
+						label.Color = v.theme.Colors.TextMuted
+						return label.Layout(gtx)
+					})
+				}
+				if entry.Result == "" {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Left: unit.Dp(16), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					label := material.Body2(v.theme.Material, entry.Result)
+					if entry.Success {
+						label.Color = v.theme.Colors.TextSecondary
+					} else {
+						label.Color = v.theme.Colors.ErrorText
+					}
+					return label.Layout(gtx)
+				})
+			}),
+		)
+	})
+}
+
+// layoutConsoleInput renders the input box for entering commands.
+func (v *DebugView) layoutConsoleInput(gtx layout.Context) layout.Dimensions {
+	isPending := dap.Client != nil && dap.Client.EvaluatePending
+
+	return layout.Stack{}.Layout(gtx,
+		// Background
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			rr := gtx.Dp(unit.Dp(4))
+			bgColor := v.theme.Colors.Background
+			if isPending {
+				bgColor = v.theme.Colors.SidebarBg
+			}
+			rect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Min},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+
+			// Border
+			borderWidth := gtx.Dp(unit.Dp(1))
+			borderRect := clip.RRect{
+				Rect: image.Rectangle{Max: gtx.Constraints.Min},
+				NE:   rr, NW: rr, SE: rr, SW: rr,
+			}
+			paint.FillShape(gtx.Ops, v.theme.Colors.Border, borderRect.Op(gtx.Ops))
+
+			// Inner fill
+			innerRect := clip.RRect{
+				Rect: image.Rectangle{
+					Min: image.Point{X: borderWidth, Y: borderWidth},
+					Max: image.Point{X: gtx.Constraints.Min.X - borderWidth, Y: gtx.Constraints.Min.Y - borderWidth},
+				},
+				NE: rr - borderWidth, NW: rr - borderWidth, SE: rr - borderWidth, SW: rr - borderWidth,
+			}
+			paint.FillShape(gtx.Ops, bgColor, innerRect.Op(gtx.Ops))
+
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		}),
+		// Content
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				// Prompt
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						label := material.Body2(v.theme.Material, ">")
+						label.Color = v.theme.Colors.Primary
+						label.Font.Weight = font.Bold
+						return label.Layout(gtx)
+					})
+				}),
+				// Input editor
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{
+						Top:    unit.Dp(8),
+						Bottom: unit.Dp(8),
+						Left:   unit.Dp(4),
+						Right:  unit.Dp(8),
+					}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						hint := "Enter command..."
+						if isPending {
+							hint = "Waiting for response..."
+						}
+						e := material.Editor(v.theme.Material, &v.consoleEditor, hint)
+						e.Color = v.theme.Colors.Text
+						e.HintColor = v.theme.Colors.TextMuted
+						return e.Layout(gtx)
+					})
+				}),
+			)
+		}),
+	)
 }
