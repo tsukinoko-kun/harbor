@@ -95,14 +95,10 @@ func (c *pipeConn) Close() error {
 	return c.conn.Close()
 }
 
-// EvaluateResult holds the result of an evaluate request (REPL command).
-type EvaluateResult struct {
-	// Expression is the command that was executed.
-	Expression string
-	// Result is the output from the command.
-	Result string
-	// Success indicates whether the command succeeded.
-	Success bool
+// ConsoleOutput holds accumulated shell output for the console.
+type ConsoleOutput struct {
+	// Text is the accumulated output from the shell.
+	Text string
 }
 
 // DapClient is the debug adapter protocol client.
@@ -129,8 +125,8 @@ type DapClient struct {
 	CurrentColumn int
 	// CurrentEndColumn is the end column of the current execution range (1-indexed).
 	CurrentEndColumn int
-	// EvaluateResults contains the history of REPL commands and their outputs.
-	EvaluateResults []EvaluateResult
+	// ConsoleOutput contains the accumulated shell output.
+	ConsoleOutput ConsoleOutput
 	// EvaluatePending indicates whether an evaluate request is in-flight.
 	EvaluatePending bool
 	// pendingExpression stores the expression being evaluated.
@@ -433,17 +429,6 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		}
 		log.Printf("[DAP] Output [%s]: %s", category, m.Body.Output)
 
-		// If we have a pending evaluate, append output to the result
-		if c.EvaluatePending && len(c.EvaluateResults) > 0 {
-			idx := len(c.EvaluateResults) - 1
-			c.EvaluateResults[idx].Result += m.Body.Output
-			// Notify UI of the update
-			select {
-			case c.UpdateChan <- struct{}{}:
-			default:
-			}
-		}
-
 	case *godap.StoppedEvent:
 		log.Printf("[DAP] Stopped: reason=%s, threadId=%d", m.Body.Reason, m.Body.ThreadId)
 		c.Stopped = true
@@ -480,32 +465,13 @@ func (c *DapClient) handleMessage(msg godap.Message) {
 		log.Printf("[DAP] Evaluate response: success=%v, result=%q", m.Success, m.Body.Result)
 		c.EvaluatePending = false
 
-		// Update the last result in the history
-		if len(c.EvaluateResults) > 0 {
-			idx := len(c.EvaluateResults) - 1
-			c.EvaluateResults[idx].Result = m.Body.Result
-			c.EvaluateResults[idx].Success = m.Success
-			if !m.Success && m.Message != "" {
-				c.EvaluateResults[idx].Result = m.Message
-			}
-		}
-
-		// Notify UI that data changed
-		select {
-		case c.UpdateChan <- struct{}{}:
-		default:
-		}
-
 	case *godap.ErrorResponse:
 		log.Printf("[DAP] Error response: command=%s, message=%s", m.Command, m.Message)
 		// Check if this is a response to an evaluate request
 		if m.Command == "evaluate" && c.EvaluatePending {
 			c.EvaluatePending = false
-			if len(c.EvaluateResults) > 0 {
-				idx := len(c.EvaluateResults) - 1
-				c.EvaluateResults[idx].Result = m.Message
-				c.EvaluateResults[idx].Success = false
-			}
+			// Append error message to console output
+			c.ConsoleOutput.Text += fmt.Sprintf("\n[Error] %s\n", m.Message)
 			// Notify UI that data changed
 			select {
 			case c.UpdateChan <- struct{}{}:
@@ -672,19 +638,6 @@ func (c *DapClient) GetStackTrace() error {
 
 // SendEvaluate sends a shell command to execute in the build container.
 func (c *DapClient) SendEvaluate(expression string) error {
-	// Add to results immediately
-	c.EvaluateResults = append(c.EvaluateResults, EvaluateResult{
-		Expression: expression,
-		Result:     "",
-		Success:    true,
-	})
-
-	// Notify UI
-	select {
-	case c.UpdateChan <- struct{}{}:
-	default:
-	}
-
 	c.shellMu.Lock()
 	hasShell := c.shellConn != nil && c.shellReady
 	c.shellMu.Unlock()
@@ -696,7 +649,7 @@ func (c *DapClient) SendEvaluate(expression string) error {
 
 	// Otherwise, open a shell session first
 	if c.EvaluatePending {
-		return fmt.Errorf("command already in progress")
+		return fmt.Errorf("shell session is starting, please wait")
 	}
 
 	c.EvaluatePending = true
@@ -790,7 +743,7 @@ func (c *DapClient) connectShell(socketPath string) {
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		log.Printf("[DAP] Failed to connect to shell socket: %v", err)
-		c.updateLastResult(fmt.Sprintf("Failed to connect: %v", err), false)
+		c.appendToConsole(fmt.Sprintf("[Error] Failed to connect: %v\n", err))
 		c.EvaluatePending = false
 		return
 	}
@@ -826,10 +779,10 @@ func (c *DapClient) connectShell(socketPath string) {
 						}
 					}()
 				}
-			} else {
-				// Update the current result
-				c.appendToLastResult(chunk)
 			}
+
+			// Append all output to console (including command echo and prompt)
+			c.appendToConsole(chunk)
 		}
 		if err != nil {
 			if err != io.EOF {
@@ -847,25 +800,14 @@ func (c *DapClient) connectShell(socketPath string) {
 	log.Printf("[DAP] Shell connection closed")
 }
 
-// updateLastResult sets the result of the last evaluate entry.
-func (c *DapClient) updateLastResult(result string, success bool) {
-	if len(c.EvaluateResults) > 0 {
-		idx := len(c.EvaluateResults) - 1
-		c.EvaluateResults[idx].Result = result
-		c.EvaluateResults[idx].Success = success
-	}
-	select {
-	case c.UpdateChan <- struct{}{}:
-	default:
-	}
-}
+// appendToConsole appends text to the console output.
+// It strips carriage returns since we display line-by-line.
+func (c *DapClient) appendToConsole(chunk string) {
+	// Strip carriage returns - they're used for cursor positioning in terminals
+	// but we display line-by-line so they just cause issues
+	chunk = strings.ReplaceAll(chunk, "\r", "")
 
-// appendToLastResult appends to the result of the last evaluate entry.
-func (c *DapClient) appendToLastResult(chunk string) {
-	if len(c.EvaluateResults) > 0 {
-		idx := len(c.EvaluateResults) - 1
-		c.EvaluateResults[idx].Result += chunk
-	}
+	c.ConsoleOutput.Text += chunk
 	select {
 	case c.UpdateChan <- struct{}{}:
 	default:

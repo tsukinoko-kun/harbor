@@ -1141,14 +1141,14 @@ func (v *DebugView) layoutConsole(gtx layout.Context) layout.Dimensions {
 	)
 }
 
-// layoutConsoleHistory renders the scrollable list of command/output pairs.
+// layoutConsoleHistory renders the console output as a terminal-style view.
 func (v *DebugView) layoutConsoleHistory(gtx layout.Context) layout.Dimensions {
 	if dap.Client == nil {
 		return layout.Dimensions{}
 	}
 
-	results := dap.Client.EvaluateResults
-	if len(results) == 0 {
+	output := dap.Client.ConsoleOutput.Text
+	if output == "" {
 		// Show placeholder when empty
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			label := material.Body2(v.theme.Material, "Type a command below...")
@@ -1157,61 +1157,37 @@ func (v *DebugView) layoutConsoleHistory(gtx layout.Context) layout.Dimensions {
 		})
 	}
 
-	// Auto-scroll to bottom when new entries are added
+	// Auto-scroll to bottom
 	v.consoleList.Position.BeforeEnd = false
 
-	return material.List(v.theme.Material, &v.consoleList).Layout(gtx, len(results), func(gtx layout.Context, index int) layout.Dimensions {
-		return v.layoutConsoleEntry(gtx, results[index], index == len(results)-1 && dap.Client.EvaluatePending)
+	// Split output into lines for rendering
+	lines := splitLines(output)
+
+	return material.List(v.theme.Material, &v.consoleList).Layout(gtx, len(lines), func(gtx layout.Context, index int) layout.Dimensions {
+		label := material.Body2(v.theme.Material, lines[index])
+		label.Color = v.theme.Colors.TextSecondary
+		return label.Layout(gtx)
 	})
 }
 
-// layoutConsoleEntry renders a single command/output pair.
-func (v *DebugView) layoutConsoleEntry(gtx layout.Context, entry dap.EvaluateResult, isPending bool) layout.Dimensions {
-	return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			// Command line with prompt
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-					// Prompt
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						label := material.Body2(v.theme.Material, "> ")
-						label.Color = v.theme.Colors.Primary
-						label.Font.Weight = font.Bold
-						return label.Layout(gtx)
-					}),
-					// Command text
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						label := material.Body2(v.theme.Material, entry.Expression)
-						label.Color = v.theme.Colors.Text
-						return label.Layout(gtx)
-					}),
-				)
-			}),
-			// Output (if available)
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if isPending {
-					// Show loading indicator
-					return layout.Inset{Left: unit.Dp(16), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						label := material.Body2(v.theme.Material, "...")
-						label.Color = v.theme.Colors.TextMuted
-						return label.Layout(gtx)
-					})
-				}
-				if entry.Result == "" {
-					return layout.Dimensions{}
-				}
-				return layout.Inset{Left: unit.Dp(16), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					label := material.Body2(v.theme.Material, entry.Result)
-					if entry.Success {
-						label.Color = v.theme.Colors.TextSecondary
-					} else {
-						label.Color = v.theme.Colors.ErrorText
-					}
-					return label.Layout(gtx)
-				})
-			}),
-		)
-	})
+// splitLines splits a string into lines, preserving empty lines.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	// Add the last line if there's remaining content
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
 }
 
 // layoutConsoleInput renders the input box for entering commands.
