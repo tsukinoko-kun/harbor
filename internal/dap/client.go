@@ -616,6 +616,38 @@ func (c *DapClient) SendStepOut() error {
 	return c.sendRequest(req)
 }
 
+// SendSetBreakpoints sends a DAP setBreakpoints request.
+// lines is a slice of 1-indexed line numbers where breakpoints should be set.
+// source is the path to the source file (typically the Dockerfile path).
+func (c *DapClient) SendSetBreakpoints(source string, lines []int) error {
+	// Build the breakpoints array
+	breakpoints := make([]godap.SourceBreakpoint, len(lines))
+	for i, line := range lines {
+		breakpoints[i] = godap.SourceBreakpoint{
+			Line: line,
+		}
+	}
+
+	req := &godap.SetBreakpointsRequest{
+		Request: godap.Request{
+			ProtocolMessage: godap.ProtocolMessage{
+				Seq:  c.nextSeq(),
+				Type: "request",
+			},
+			Command: "setBreakpoints",
+		},
+		Arguments: godap.SetBreakpointsArguments{
+			Source: godap.Source{
+				Path: source,
+			},
+			Breakpoints: breakpoints,
+		},
+	}
+
+	c.log("[DAP] Setting %d breakpoints in %s", len(lines), source)
+	return c.sendRequest(req)
+}
+
 // GetStackTrace sends a DAP stackTrace request and updates CurrentLine.
 // This should be called when the debugger is stopped to get the current execution position.
 func (c *DapClient) GetStackTrace() error {

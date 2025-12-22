@@ -37,6 +37,7 @@ type Colors struct {
 	SidebarIconDefault color.NRGBA
 	SidebarIconActive  color.NRGBA
 	SidebarSelectedBg  color.NRGBA
+	Breakpoint         color.NRGBA
 }
 
 // SyntaxColors defines colors for syntax highlighting.
@@ -93,6 +94,7 @@ func DefaultColors() Colors {
 		SidebarIconDefault: rgb(0x9ca3af), // Gray for non-selected icons
 		SidebarIconActive:  rgb(0x818cf8), // Indigo for selected icons
 		SidebarSelectedBg:  rgb(0x312e81), // Dark indigo background for selected
+		Breakpoint:         rgb(0xe06c75), // Red for breakpoint indicators
 	}
 }
 

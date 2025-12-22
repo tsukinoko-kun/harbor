@@ -265,6 +265,10 @@ type DebugView struct {
 	dockerfileHScroll    widget.List        // Horizontal scroll for wide content
 	dockerfileHighlights [][]highlightToken // Syntax highlights per line
 
+	// Breakpoint state
+	breakpoints    map[int]bool       // Map of line numbers (1-indexed) to breakpoint state
+	lineClickables []widget.Clickable // Clickable areas for each line (for toggling breakpoints)
+
 	// Log panel state
 	logList   widget.List   // Scrollable list for log entries
 	logEditor widget.Editor // Read-only editor for selectable log text
@@ -314,6 +318,7 @@ func NewDebugView(theme *Theme, settings *config.Settings) *DebugView {
 				Axis: layout.Vertical,
 			},
 		},
+		breakpoints: make(map[int]bool),
 	}
 }
 
@@ -629,6 +634,9 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 		v.dockerfilePath = ""
 		v.dockerfileHighlights = nil
 		v.lastScrolledLine = 0
+		// Clear breakpoints and clickables
+		v.breakpoints = make(map[int]bool)
+		v.lineClickables = nil
 		// Return early to avoid accessing the now-nil client
 		return layout.Dimensions{}
 	}
@@ -698,9 +706,12 @@ func (v *DebugView) loadDockerfile(path string) {
 		return // Already loaded
 	}
 
+	// Clear old state when loading a different file
 	v.dockerfilePath = path
 	v.dockerfileLines = nil
 	v.dockerfileHighlights = nil
+	v.lineClickables = nil
+	v.breakpoints = make(map[int]bool) // Clear breakpoints for new file
 
 	// Read the entire file content
 	content, err := os.ReadFile(path)
@@ -722,6 +733,9 @@ func (v *DebugView) loadDockerfile(path string) {
 
 	// Parse syntax highlights
 	v.dockerfileHighlights = parseDockerfileHighlights(content, v.dockerfileLines)
+
+	// Initialize clickables for each line (for breakpoint toggling)
+	v.lineClickables = make([]widget.Clickable, len(v.dockerfileLines))
 }
 
 // layoutDockerfile renders the Dockerfile content with line numbers and execution marker.
@@ -803,7 +817,16 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 							tokens = v.dockerfileHighlights[index]
 						}
 
-						return v.layoutDockerfileLine(gtx, lineNum, tokens, isInRange, isRangeStart, markerWidth, lineNumWidth)
+						// Get the clickable for this line (for breakpoint toggling)
+						var clickable *widget.Clickable
+						if index < len(v.lineClickables) {
+							clickable = &v.lineClickables[index]
+						}
+
+						// Check if this line has a breakpoint
+						hasBreakpoint := v.breakpoints[lineNum]
+
+						return v.layoutDockerfileLine(gtx, lineNum, tokens, isInRange, isRangeStart, hasBreakpoint, clickable, markerWidth, lineNumWidth)
 					})
 				})
 			})
@@ -814,8 +837,22 @@ func (v *DebugView) layoutDockerfile(gtx layout.Context) layout.Dimensions {
 // layoutDockerfileLine renders a single line of the Dockerfile with syntax highlighting.
 // isInRange indicates if this line is within the current execution range.
 // isRangeStart indicates if this is the first line of the range (shows play arrow).
-func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, tokens []highlightToken, isInRange, isRangeStart bool, markerWidth, lineNumWidth int) layout.Dimensions {
+// hasBreakpoint indicates if this line has a breakpoint set.
+// clickable is used for click detection on the gutter area to toggle breakpoints.
+func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, tokens []highlightToken, isInRange, isRangeStart, hasBreakpoint bool, clickable *widget.Clickable, markerWidth, lineNumWidth int) layout.Dimensions {
 	lineHeight := gtx.Dp(unit.Dp(22))
+
+	// Handle breakpoint toggle clicks
+	if clickable != nil && clickable.Clicked(gtx) {
+		// Toggle breakpoint for this line
+		if v.breakpoints[lineNum] {
+			delete(v.breakpoints, lineNum)
+		} else {
+			v.breakpoints[lineNum] = true
+		}
+		// Send updated breakpoints to DAP server
+		v.sendBreakpointsToDAP()
+	}
 
 	// Wrap content in a Stack to draw background highlight for lines in range
 	return layout.Stack{}.Layout(gtx,
@@ -837,41 +874,84 @@ func (v *DebugView) layoutDockerfileLine(gtx layout.Context, lineNum int, tokens
 		// Line content
 		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				// Marker area (play arrow for range start)
+				// Gutter area (breakpoint dot + play arrow) - clickable for toggling breakpoints
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = markerWidth
-					gtx.Constraints.Max.X = markerWidth
+					gutterWidth := markerWidth + lineNumWidth
+					gtx.Constraints.Min.X = gutterWidth
+					gtx.Constraints.Max.X = gutterWidth
 					gtx.Constraints.Min.Y = lineHeight
 					gtx.Constraints.Max.Y = lineHeight
 
-					if isRangeStart {
-						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							iconSize := gtx.Dp(unit.Dp(16))
-							gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
-							gtx.Constraints.Max = gtx.Constraints.Min
-							return icons.AVPlayArrow.Layout(gtx, v.theme.Colors.Primary)
+					// Wrap gutter in clickable area
+					gutterLayout := func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							// Marker area (breakpoint dot and/or play arrow)
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								gtx.Constraints.Min.X = markerWidth
+								gtx.Constraints.Max.X = markerWidth
+								gtx.Constraints.Min.Y = lineHeight
+								gtx.Constraints.Max.Y = lineHeight
+
+								return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									// Draw breakpoint dot if set
+									if hasBreakpoint {
+										dotSize := gtx.Dp(unit.Dp(10))
+										center := image.Point{X: dotSize / 2, Y: dotSize / 2}
+										radius := dotSize / 2
+
+										// Draw filled circle for breakpoint
+										circle := clip.Ellipse{
+											Min: image.Point{X: center.X - radius, Y: center.Y - radius},
+											Max: image.Point{X: center.X + radius, Y: center.Y + radius},
+										}
+										paint.FillShape(gtx.Ops, v.theme.Colors.Breakpoint, circle.Op(gtx.Ops))
+										return layout.Dimensions{Size: image.Point{X: dotSize, Y: dotSize}}
+									}
+
+									// Show play arrow for current execution line (only if no breakpoint)
+									if isRangeStart {
+										iconSize := gtx.Dp(unit.Dp(16))
+										gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+										gtx.Constraints.Max = gtx.Constraints.Min
+										return icons.AVPlayArrow.Layout(gtx, v.theme.Colors.Primary)
+									}
+
+									return layout.Dimensions{Size: image.Point{X: markerWidth, Y: lineHeight}}
+								})
+							}),
+							// Line number
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								gtx.Constraints.Min.X = lineNumWidth
+								gtx.Constraints.Max.X = lineNumWidth
+								gtx.Constraints.Min.Y = lineHeight
+								gtx.Constraints.Max.Y = lineHeight
+
+								return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										label := material.Body2(v.theme.Material, fmt.Sprintf("%d", lineNum))
+										if isInRange {
+											label.Color = v.theme.Colors.Text // Brighter for lines in range
+										} else {
+											label.Color = v.theme.Colors.TextMuted
+										}
+										return label.Layout(gtx)
+									})
+								})
+							}),
+						)
+					}
+
+					// If we have a clickable, wrap the gutter in it
+					if clickable != nil {
+						return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							// Show pointer cursor on hover
+							if clickable.Hovered() {
+								pointer.CursorPointer.Add(gtx.Ops)
+							}
+							return gutterLayout(gtx)
 						})
 					}
-					return layout.Dimensions{Size: image.Point{X: markerWidth, Y: lineHeight}}
-				}),
-				// Line number
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = lineNumWidth
-					gtx.Constraints.Max.X = lineNumWidth
-					gtx.Constraints.Min.Y = lineHeight
-					gtx.Constraints.Max.Y = lineHeight
-
-					return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							label := material.Body2(v.theme.Material, fmt.Sprintf("%d", lineNum))
-							if isInRange {
-								label.Color = v.theme.Colors.Text // Brighter for lines in range
-							} else {
-								label.Color = v.theme.Colors.TextMuted
-							}
-							return label.Layout(gtx)
-						})
-					})
+					return gutterLayout(gtx)
 				}),
 				// Separator
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -944,6 +1024,28 @@ func (v *DebugView) getCaptureColor(capture string) color.NRGBA {
 	default:
 		return v.theme.Syntax.Default
 	}
+}
+
+// sendBreakpointsToDAP sends the current breakpoints to the DAP server.
+func (v *DebugView) sendBreakpointsToDAP() {
+	if dap.Client == nil || v.dockerfilePath == "" {
+		return
+	}
+
+	// Collect all breakpoint line numbers
+	lines := make([]int, 0, len(v.breakpoints))
+	for lineNum, enabled := range v.breakpoints {
+		if enabled {
+			lines = append(lines, lineNum)
+		}
+	}
+
+	// Send to DAP server (fire and forget, errors are logged internally)
+	go func() {
+		if err := dap.Client.SendSetBreakpoints(v.dockerfilePath, lines); err != nil {
+			log.Printf("Failed to send breakpoints: %v", err)
+		}
+	}()
 }
 
 // brightenColor increases the brightness of a color by the given factor (0-1).
