@@ -629,14 +629,7 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 		log.Printf("Stopping debugger...")
 		dap.Client.Close()
 		dap.Client = nil
-		// Clear cached Dockerfile content so it reloads on next debug session
-		v.dockerfileLines = nil
-		v.dockerfilePath = ""
-		v.dockerfileHighlights = nil
-		v.lastScrolledLine = 0
-		// Clear breakpoints and clickables
-		v.breakpoints = make(map[int]bool)
-		v.lineClickables = nil
+		v.resetState()
 		// Return early to avoid accessing the now-nil client
 		return layout.Dimensions{}
 	}
@@ -699,6 +692,16 @@ func (v *DebugView) layoutRunning(gtx layout.Context) layout.Dimensions {
 	)
 }
 
+// resetState clears all debug view state, preparing for a new session or file.
+func (v *DebugView) resetState() {
+	v.dockerfileLines = nil
+	v.dockerfilePath = ""
+	v.dockerfileHighlights = nil
+	v.lineClickables = nil
+	v.breakpoints = make(map[int]bool)
+	v.lastScrolledLine = 0
+}
+
 // loadDockerfile reads the Dockerfile content into dockerfileLines.
 // It caches the result and only reloads if the path changes.
 func (v *DebugView) loadDockerfile(path string) {
@@ -706,12 +709,8 @@ func (v *DebugView) loadDockerfile(path string) {
 		return // Already loaded
 	}
 
-	// Clear old state when loading a different file
+	v.resetState()
 	v.dockerfilePath = path
-	v.dockerfileLines = nil
-	v.dockerfileHighlights = nil
-	v.lineClickables = nil
-	v.breakpoints = make(map[int]bool) // Clear breakpoints for new file
 
 	// Read the entire file content
 	content, err := os.ReadFile(path)
