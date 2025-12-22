@@ -210,4 +210,3 @@ func clampByte(v int) uint8 {
 	}
 	return uint8(v)
 }
-

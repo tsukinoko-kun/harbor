@@ -486,4 +486,3 @@ func TestTerminal_ComplexSequence(t *testing.T) {
 		t.Error("Expected green span for file")
 	}
 }
-

@@ -54,11 +54,11 @@ func (ActionOSC) isAction() {}
 // Parser is an ANSI escape sequence parser.
 // It processes input bytes and emits Actions.
 type Parser struct {
-	state       ParserState
-	params      []int       // current parameter values
-	curParam    int         // current parameter being built (-1 if not started)
-	intermediate []byte     // intermediate bytes
-	oscData     []byte      // OSC payload
+	state        ParserState
+	params       []int  // current parameter values
+	curParam     int    // current parameter being built (-1 if not started)
+	intermediate []byte // intermediate bytes
+	oscData      []byte // OSC payload
 }
 
 // NewParser creates a new ANSI parser.
@@ -269,22 +269,22 @@ func IsExecute(a Action) bool {
 type CSICommand int
 
 const (
-	CSIUnknown CSICommand = iota
-	CSICursorUp            // A
-	CSICursorDown          // B
-	CSICursorForward       // C
-	CSICursorBack          // D
-	CSICursorNextLine      // E
-	CSICursorPrevLine      // F
-	CSICursorColumn        // G
-	CSICursorPosition      // H (and f)
-	CSIEraseDisplay        // J
-	CSIEraseLine           // K
-	CSIScrollUp            // S
-	CSIScrollDown          // T
-	CSISGR                 // m (Select Graphic Rendition)
-	CSISaveCursor          // s
-	CSIRestoreCursor       // u
+	CSIUnknown        CSICommand = iota
+	CSICursorUp                  // A
+	CSICursorDown                // B
+	CSICursorForward             // C
+	CSICursorBack                // D
+	CSICursorNextLine            // E
+	CSICursorPrevLine            // F
+	CSICursorColumn              // G
+	CSICursorPosition            // H (and f)
+	CSIEraseDisplay              // J
+	CSIEraseLine                 // K
+	CSIScrollUp                  // S
+	CSIScrollDown                // T
+	CSISGR                       // m (Select Graphic Rendition)
+	CSISaveCursor                // s
+	CSIRestoreCursor             // u
 )
 
 // GetCSICommand returns the command type for a CSI action.
@@ -335,4 +335,3 @@ func (csi ActionCSI) GetParam(index, defaultValue int) int {
 	}
 	return csi.Params[index]
 }
-

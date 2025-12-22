@@ -16,8 +16,8 @@ const (
 
 // Color represents a terminal color that can be default, indexed (8/16/256), or RGB.
 type Color struct {
-	Type  ColorType
-	Index uint8 // For ColorIndexed: 0-255
+	Type    ColorType
+	Index   uint8 // For ColorIndexed: 0-255
 	R, G, B uint8 // For ColorRGB
 }
 
@@ -177,4 +177,3 @@ func GetPalette256Color(index uint8) color.NRGBA {
 	initPalette256()
 	return palette256[index]
 }
-

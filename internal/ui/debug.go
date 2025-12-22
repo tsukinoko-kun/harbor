@@ -736,14 +736,14 @@ func (v *DebugView) drawCheckmark(gtx layout.Context, boxSize int) {
 	// Short leg: from bottom-left going down-right
 	// Long leg: from bottom going up-right
 	padding := boxSize / 5
-	
+
 	// Points for the checkmark (adjusted for visual centering)
-	x1 := padding + 1                    // Start of short leg
-	y1 := boxSize/2 + 1                  // Start Y
-	x2 := boxSize/2 - 1                  // Corner point X
-	y2 := boxSize - padding - 2         // Corner point Y (bottom of check)
-	x3 := boxSize - padding - 1         // End of long leg X
-	y3 := padding + 2                    // End of long leg Y (top)
+	x1 := padding + 1           // Start of short leg
+	y1 := boxSize/2 + 1         // Start Y
+	x2 := boxSize/2 - 1         // Corner point X
+	y2 := boxSize - padding - 2 // Corner point Y (bottom of check)
+	x3 := boxSize - padding - 1 // End of long leg X
+	y3 := padding + 2           // End of long leg Y (top)
 
 	// Draw short leg (bottom-left to corner)
 	drawLine(gtx.Ops, white, strokeWidth, x1, y1, x2, y2)
@@ -757,14 +757,14 @@ func drawLine(ops *op.Ops, c color.NRGBA, width, x1, y1, x2, y2 int) {
 	dx := float32(x2 - x1)
 	dy := float32(y2 - y1)
 	length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
-	
+
 	if length < 1 {
 		return
 	}
 
 	// Create a thin rectangle and rotate it
 	halfWidth := float32(width) / 2
-	
+
 	// Build the path for a line segment
 	var path clip.Path
 	path.Begin(ops)
@@ -773,7 +773,7 @@ func drawLine(ops *op.Ops, c color.NRGBA, width, x1, y1, x2, y2 int) {
 	path.LineTo(f32.Point{X: float32(x2), Y: float32(y2) + halfWidth})
 	path.LineTo(f32.Point{X: float32(x1), Y: float32(y1) + halfWidth})
 	path.Close()
-	
+
 	paint.FillShape(ops, c, clip.Outline{Path: path.End()}.Op())
 }
 

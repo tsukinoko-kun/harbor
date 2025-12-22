@@ -293,4 +293,3 @@ func (b *Buffer) DeleteRow(row int) {
 	}
 	b.cells = append(b.cells[:row], b.cells[row+1:]...)
 }
-

@@ -126,12 +126,12 @@ func TestToNRGBA_Indexed256_ColorCube(t *testing.T) {
 		index uint8
 		want  color.NRGBA
 	}{
-		{16, color.NRGBA{R: 0, G: 0, B: 0, A: 255}},           // (0,0,0)
-		{21, color.NRGBA{R: 0, G: 0, B: 255, A: 255}},         // (0,0,5)
-		{196, color.NRGBA{R: 255, G: 0, B: 0, A: 255}},        // (5,0,0)
-		{46, color.NRGBA{R: 0, G: 255, B: 0, A: 255}},         // (0,5,0)
-		{231, color.NRGBA{R: 255, G: 255, B: 255, A: 255}},    // (5,5,5)
-		{59, color.NRGBA{R: 95, G: 95, B: 95, A: 255}},        // (1,1,1)
+		{16, color.NRGBA{R: 0, G: 0, B: 0, A: 255}},        // (0,0,0)
+		{21, color.NRGBA{R: 0, G: 0, B: 255, A: 255}},      // (0,0,5)
+		{196, color.NRGBA{R: 255, G: 0, B: 0, A: 255}},     // (5,0,0)
+		{46, color.NRGBA{R: 0, G: 255, B: 0, A: 255}},      // (0,5,0)
+		{231, color.NRGBA{R: 255, G: 255, B: 255, A: 255}}, // (5,5,5)
+		{59, color.NRGBA{R: 95, G: 95, B: 95, A: 255}},     // (1,1,1)
 	}
 
 	defaultC := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
@@ -216,4 +216,3 @@ func TestPalette256_ColorCubeFormula(t *testing.T) {
 		}
 	}
 }
-

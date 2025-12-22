@@ -20,8 +20,8 @@ type Terminal struct {
 	}
 
 	// UTF-8 decoding state
-	utf8Buf   []byte
-	utf8Need  int
+	utf8Buf  []byte
+	utf8Need int
 }
 
 // New creates a new Terminal with unbounded width.
@@ -336,4 +336,3 @@ func (t *Terminal) CurrentStyle() Style {
 	defer t.mu.RUnlock()
 	return t.currentStyle
 }
-

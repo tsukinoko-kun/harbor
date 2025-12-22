@@ -398,4 +398,3 @@ func TestBuffer_TrimTrailingEmptyRows_KeepsStyledCells(t *testing.T) {
 		t.Errorf("Height() = %d, want 2", b.Height())
 	}
 }
-

@@ -472,4 +472,3 @@ func TestIsPrint_IsCSI_IsExecute(t *testing.T) {
 		t.Error("IsExecute(ActionPrint) should be false")
 	}
 }
-

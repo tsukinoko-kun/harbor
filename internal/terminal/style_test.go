@@ -283,4 +283,3 @@ func TestClampByte(t *testing.T) {
 		}
 	}
 }
-
