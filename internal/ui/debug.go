@@ -7,13 +7,16 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 
 	"gio.tools/icons"
+	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
@@ -239,6 +242,13 @@ func fillGaps(tokens []highlightToken, line string) []highlightToken {
 	return result
 }
 
+// buildArgRow holds state for a single key-value build argument.
+type buildArgRow struct {
+	keyEditor   widget.Editor
+	valueEditor widget.Editor
+	removeBtn   widget.Clickable
+}
+
 // DebugView displays debug information and controls.
 type DebugView struct {
 	theme    *Theme
@@ -249,6 +259,10 @@ type DebugView struct {
 	dockerfileBrowseButton widget.Clickable
 	contextEditor          widget.Editor
 	contextBrowseButton    widget.Clickable
+	cachingEnabled         widget.Bool
+	pullImages             widget.Bool
+	buildArgs              []buildArgRow
+	addBuildArgBtn         widget.Clickable
 	startButton            widget.Clickable
 
 	// Debug control buttons
@@ -359,12 +373,18 @@ func (v *DebugView) layoutHeader(gtx layout.Context) layout.Dimensions {
 
 // layoutStartForm shows the form to configure and start the debugger
 func (v *DebugView) layoutStartForm(gtx layout.Context) layout.Dimensions {
-	// Handle start button click
-	if v.startButton.Clicked(gtx) {
+	// Check if form is valid (no duplicate build arg keys)
+	hasDuplicates := v.hasDuplicateBuildArgKeys()
+
+	// Handle start button click (only if no duplicates)
+	if v.startButton.Clicked(gtx) && !hasDuplicates {
 		params := dap.DebugParams{
-			Dockerfile: v.dockerfileEditor.Text(),
-			Context:    v.contextEditor.Text(),
-			PS1:        v.settings.DebugPS1,
+			Dockerfile:    v.dockerfileEditor.Text(),
+			Context:       v.contextEditor.Text(),
+			PS1:           v.settings.DebugPS1,
+			EnableCaching: v.cachingEnabled.Value,
+			PullImages:    v.pullImages.Value,
+			BuildArgs:     v.collectBuildArgs(),
 		}
 		client, err := dap.NewClient(params)
 		if err != nil {
@@ -417,10 +437,28 @@ func (v *DebugView) layoutStartForm(gtx layout.Context) layout.Dimensions {
 				return v.layoutFormFieldWithBrowse(gtx, "Build Context", "Context directory (e.g., .)", &v.contextEditor, &v.contextBrowseButton, icons.FileFolderOpen)
 			})
 		}),
+		// Enable caching checkbox
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return v.layoutCheckbox(gtx, &v.cachingEnabled, "Enable caching", "Cached layers are skipped, making those lines not debuggable.")
+			})
+		}),
+		// Pull images checkbox
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return v.layoutCheckbox(gtx, &v.pullImages, "Pull images", "")
+			})
+		}),
+		// Build arguments
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return v.layoutBuildArgsList(gtx)
+			})
+		}),
 		// Start button
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return v.layoutStartButton(gtx)
+				return v.layoutStartButton(gtx, hasDuplicates)
 			})
 		}),
 	)
@@ -559,18 +597,22 @@ func (v *DebugView) layoutTextInput(gtx layout.Context, hint string, editor *wid
 	)
 }
 
-// layoutStartButton renders the start debugger button
-func (v *DebugView) layoutStartButton(gtx layout.Context) layout.Dimensions {
+// layoutStartButton renders the start debugger button.
+// If disabled is true, the button appears grayed out.
+func (v *DebugView) layoutStartButton(gtx layout.Context, disabled bool) layout.Dimensions {
 	return v.startButton.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if v.startButton.Hovered() {
+		if !disabled && v.startButton.Hovered() {
 			pointer.CursorPointer.Add(gtx.Ops)
 		}
 		return layout.Stack{}.Layout(gtx,
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				bgColor := v.theme.Colors.Primary
-				if v.startButton.Hovered() {
-					// Slightly lighter on hover
-					bgColor = lightenColor(bgColor, 0.1)
+				var bgColor color.NRGBA
+				if disabled {
+					bgColor = v.theme.Colors.ButtonBg
+				} else if v.startButton.Hovered() {
+					bgColor = lightenColor(v.theme.Colors.Primary, 0.1)
+				} else {
+					bgColor = v.theme.Colors.Primary
 				}
 
 				rr := gtx.Dp(unit.Dp(6))
@@ -589,12 +631,433 @@ func (v *DebugView) layoutStartButton(gtx layout.Context) layout.Dimensions {
 					Right:  unit.Dp(24),
 				}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					label := material.Body1(v.theme.Material, "Start Debugger")
-					label.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+					if disabled {
+						label.Color = v.theme.Colors.TextMuted
+					} else {
+						label.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+					}
 					return label.Layout(gtx)
 				})
 			}),
 		)
 	})
+}
+
+// layoutCheckbox renders a styled checkbox with a label and optional warning text.
+// Warning text is gray by default and yellow when checkbox is checked.
+func (v *DebugView) layoutCheckbox(gtx layout.Context, checkbox *widget.Bool, label string, warning string) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// Checkbox with label
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return checkbox.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				if checkbox.Hovered() {
+					pointer.CursorPointer.Add(gtx.Ops)
+				}
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					// Checkbox box
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						size := gtx.Dp(unit.Dp(18))
+						rr := gtx.Dp(unit.Dp(3))
+
+						// Draw checkbox border
+						borderColor := v.theme.Colors.Border
+						if checkbox.Value {
+							borderColor = v.theme.Colors.Primary
+						}
+
+						rect := clip.RRect{
+							Rect: image.Rectangle{Max: image.Point{X: size, Y: size}},
+							NE:   rr, NW: rr, SE: rr, SW: rr,
+						}
+						paint.FillShape(gtx.Ops, borderColor, rect.Op(gtx.Ops))
+
+						// Inner fill
+						borderWidth := gtx.Dp(unit.Dp(2))
+						innerRect := clip.RRect{
+							Rect: image.Rectangle{
+								Min: image.Point{X: borderWidth, Y: borderWidth},
+								Max: image.Point{X: size - borderWidth, Y: size - borderWidth},
+							},
+							NE: rr - 1, NW: rr - 1, SE: rr - 1, SW: rr - 1,
+						}
+						innerColor := v.theme.Colors.CardBg
+						if checkbox.Hovered() && !checkbox.Value {
+							innerColor = v.theme.Colors.ButtonHover
+						}
+						if checkbox.Value {
+							innerColor = v.theme.Colors.Primary
+						}
+						paint.FillShape(gtx.Ops, innerColor, innerRect.Op(gtx.Ops))
+
+						// Draw checkmark if checked
+						if checkbox.Value {
+							v.drawCheckmark(gtx, size)
+						}
+
+						return layout.Dimensions{Size: image.Point{X: size, Y: size}}
+					}),
+					// Label
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							l := material.Body2(v.theme.Material, label)
+							l.Color = v.theme.Colors.Text
+							return l.Layout(gtx)
+						})
+					}),
+				)
+			})
+		}),
+		// Warning text (if provided) - gray by default, yellow when checked
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if warning == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Left: unit.Dp(26), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Caption(v.theme.Material, warning)
+				if checkbox.Value {
+					l.Color = v.theme.Colors.Warning
+				} else {
+					l.Color = v.theme.Colors.TextMuted
+				}
+				return l.Layout(gtx)
+			})
+		}),
+	)
+}
+
+// drawCheckmark draws a checkmark icon inside the checkbox.
+func (v *DebugView) drawCheckmark(gtx layout.Context, boxSize int) {
+	// Draw a simple checkmark using lines
+	// The checkmark consists of two line segments forming a "✓" shape
+	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	strokeWidth := gtx.Dp(unit.Dp(2))
+
+	// Calculate checkmark points relative to box size
+	// Short leg: from bottom-left going down-right
+	// Long leg: from bottom going up-right
+	padding := boxSize / 5
+	
+	// Points for the checkmark (adjusted for visual centering)
+	x1 := padding + 1                    // Start of short leg
+	y1 := boxSize/2 + 1                  // Start Y
+	x2 := boxSize/2 - 1                  // Corner point X
+	y2 := boxSize - padding - 2         // Corner point Y (bottom of check)
+	x3 := boxSize - padding - 1         // End of long leg X
+	y3 := padding + 2                    // End of long leg Y (top)
+
+	// Draw short leg (bottom-left to corner)
+	drawLine(gtx.Ops, white, strokeWidth, x1, y1, x2, y2)
+	// Draw long leg (corner to top-right)
+	drawLine(gtx.Ops, white, strokeWidth, x2, y2, x3, y3)
+}
+
+// drawLine draws a line between two points using a rotated rectangle.
+func drawLine(ops *op.Ops, c color.NRGBA, width, x1, y1, x2, y2 int) {
+	// Calculate line length and angle
+	dx := float32(x2 - x1)
+	dy := float32(y2 - y1)
+	length := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	
+	if length < 1 {
+		return
+	}
+
+	// Create a thin rectangle and rotate it
+	halfWidth := float32(width) / 2
+	
+	// Build the path for a line segment
+	var path clip.Path
+	path.Begin(ops)
+	path.MoveTo(f32.Point{X: float32(x1), Y: float32(y1) - halfWidth})
+	path.LineTo(f32.Point{X: float32(x2), Y: float32(y2) - halfWidth})
+	path.LineTo(f32.Point{X: float32(x2), Y: float32(y2) + halfWidth})
+	path.LineTo(f32.Point{X: float32(x1), Y: float32(y1) + halfWidth})
+	path.Close()
+	
+	paint.FillShape(ops, c, clip.Outline{Path: path.End()}.Op())
+}
+
+// layoutBuildArgsList renders the dynamic list of build arguments with add/remove buttons.
+func (v *DebugView) layoutBuildArgsList(gtx layout.Context) layout.Dimensions {
+	// Handle add button click
+	if v.addBuildArgBtn.Clicked(gtx) {
+		v.buildArgs = append(v.buildArgs, buildArgRow{
+			keyEditor: widget.Editor{
+				SingleLine: true,
+				Submit:     false,
+			},
+			valueEditor: widget.Editor{
+				SingleLine: true,
+				Submit:     false,
+			},
+		})
+	}
+
+	// Handle remove button clicks (iterate in reverse to handle removal safely)
+	for i := len(v.buildArgs) - 1; i >= 0; i-- {
+		if v.buildArgs[i].removeBtn.Clicked(gtx) {
+			v.buildArgs = append(v.buildArgs[:i], v.buildArgs[i+1:]...)
+		}
+	}
+
+	// Detect duplicate keys
+	duplicates := v.findDuplicateBuildArgKeys()
+
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		// Label
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Body2(v.theme.Material, "Build Arguments")
+				l.Color = v.theme.Colors.Text
+				return l.Layout(gtx)
+			})
+		}),
+		// Duplicate warning
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if len(duplicates) == 0 {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Caption(v.theme.Material, "Duplicate keys are not allowed")
+				l.Color = v.theme.Colors.ButtonDanger
+				return l.Layout(gtx)
+			})
+		}),
+		// Build arg rows
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if len(v.buildArgs) == 0 {
+				return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					l := material.Caption(v.theme.Material, "No build arguments defined")
+					l.Color = v.theme.Colors.TextMuted
+					return l.Layout(gtx)
+				})
+			}
+
+			// Render each row
+			children := make([]layout.FlexChild, len(v.buildArgs))
+			for i := range v.buildArgs {
+				idx := i // Capture for closure
+				isDuplicate := duplicates[v.buildArgs[idx].keyEditor.Text()]
+				children[i] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return v.layoutBuildArgRow(gtx, idx, isDuplicate)
+					})
+				})
+			}
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+		}),
+		// Add button
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return v.layoutAddButton(gtx)
+		}),
+	)
+}
+
+// findDuplicateBuildArgKeys returns a map of keys that appear more than once.
+func (v *DebugView) findDuplicateBuildArgKeys() map[string]bool {
+	keyCounts := make(map[string]int)
+	for _, row := range v.buildArgs {
+		key := row.keyEditor.Text()
+		if key != "" {
+			keyCounts[key]++
+		}
+	}
+
+	duplicates := make(map[string]bool)
+	for key, count := range keyCounts {
+		if count > 1 {
+			duplicates[key] = true
+		}
+	}
+	return duplicates
+}
+
+// hasDuplicateBuildArgKeys returns true if there are any duplicate build arg keys.
+func (v *DebugView) hasDuplicateBuildArgKeys() bool {
+	return len(v.findDuplicateBuildArgKeys()) > 0
+}
+
+// layoutBuildArgRow renders a single build argument row with key, value, and remove button.
+func (v *DebugView) layoutBuildArgRow(gtx layout.Context, index int, isDuplicate bool) layout.Dimensions {
+	row := &v.buildArgs[index]
+
+	// Fixed dimensions for consistent layout
+	keyWidth := gtx.Dp(unit.Dp(100))
+	valueWidth := gtx.Dp(unit.Dp(250))
+	buttonSize := gtx.Dp(unit.Dp(28))
+	rowHeight := gtx.Dp(unit.Dp(36))
+	gap := gtx.Dp(unit.Dp(8))
+
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		// Key field (fixed size)
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min = image.Point{X: keyWidth, Y: rowHeight}
+			gtx.Constraints.Max = gtx.Constraints.Min
+			return v.layoutSmallTextInput(gtx, "Key", &row.keyEditor, isDuplicate)
+		}),
+		// Gap
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Point{X: gap}}
+		}),
+		// Value field (fixed size, wider)
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min = image.Point{X: valueWidth, Y: rowHeight}
+			gtx.Constraints.Max = gtx.Constraints.Min
+			return v.layoutSmallTextInput(gtx, "Value", &row.valueEditor, false)
+		}),
+		// Gap
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Point{X: gap}}
+		}),
+		// Remove button (fixed size)
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min = image.Point{X: buttonSize, Y: buttonSize}
+			gtx.Constraints.Max = gtx.Constraints.Min
+			return v.layoutRemoveButton(gtx, &row.removeBtn)
+		}),
+	)
+}
+
+// layoutSmallTextInput renders a smaller text input suitable for build args.
+// If isError is true, the border is drawn in red to indicate an error.
+// Returns exactly the size specified in constraints (fixed size).
+func (v *DebugView) layoutSmallTextInput(gtx layout.Context, hint string, editor *widget.Editor, isError bool) layout.Dimensions {
+	// Use the exact size from constraints
+	size := gtx.Constraints.Min
+
+	rr := gtx.Dp(unit.Dp(4))
+
+	// Border - red if error, normal otherwise
+	borderWidth := gtx.Dp(unit.Dp(1))
+	borderColor := v.theme.Colors.Border
+	if isError {
+		borderColor = v.theme.Colors.ButtonDanger
+		borderWidth = gtx.Dp(unit.Dp(2))
+	}
+
+	// Draw border
+	borderRect := clip.RRect{
+		Rect: image.Rectangle{Max: size},
+		NE:   rr, NW: rr, SE: rr, SW: rr,
+	}
+	paint.FillShape(gtx.Ops, borderColor, borderRect.Op(gtx.Ops))
+
+	// Draw inner fill
+	innerRect := clip.RRect{
+		Rect: image.Rectangle{
+			Min: image.Point{X: borderWidth, Y: borderWidth},
+			Max: image.Point{X: size.X - borderWidth, Y: size.Y - borderWidth},
+		},
+		NE: rr - borderWidth, NW: rr - borderWidth, SE: rr - borderWidth, SW: rr - borderWidth,
+	}
+	paint.FillShape(gtx.Ops, v.theme.Colors.CardBg, innerRect.Op(gtx.Ops))
+
+	// Layout editor with padding inside the fixed size
+	padding := gtx.Dp(unit.Dp(8))
+	editorGtx := gtx
+	editorGtx.Constraints.Min = image.Point{X: size.X - 2*padding, Y: size.Y - 2*padding}
+	editorGtx.Constraints.Max = editorGtx.Constraints.Min
+
+	// Offset for padding
+	defer op.Offset(image.Point{X: padding, Y: padding}).Push(gtx.Ops).Pop()
+
+	e := material.Editor(v.theme.Material, editor, hint)
+	e.Color = v.theme.Colors.Text
+	e.HintColor = v.theme.Colors.TextMuted
+	e.Layout(editorGtx)
+
+	return layout.Dimensions{Size: size}
+}
+
+// layoutAddButton renders the add button for build arguments.
+func (v *DebugView) layoutAddButton(gtx layout.Context) layout.Dimensions {
+	return v.addBuildArgBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if v.addBuildArgBtn.Hovered() {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+			// Plus icon
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				iconSize := gtx.Dp(unit.Dp(16))
+				gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+				gtx.Constraints.Max = gtx.Constraints.Min
+				iconColor := v.theme.Colors.Primary
+				if v.addBuildArgBtn.Hovered() {
+					iconColor = lightenColor(iconColor, 0.2)
+				}
+				return icons.ContentAdd.Layout(gtx, iconColor)
+			}),
+			// Label
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Left: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					l := material.Body2(v.theme.Material, "Add")
+					l.Color = v.theme.Colors.Primary
+					if v.addBuildArgBtn.Hovered() {
+						l.Color = lightenColor(l.Color, 0.2)
+					}
+					return l.Layout(gtx)
+				})
+			}),
+		)
+	})
+}
+
+// layoutRemoveButton renders the remove button (X) for a build argument row.
+// Returns exactly the size specified in constraints (fixed size).
+func (v *DebugView) layoutRemoveButton(gtx layout.Context, clickable *widget.Clickable) layout.Dimensions {
+	// Use the exact size from constraints
+	size := gtx.Constraints.Min
+
+	return clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if clickable.Hovered() {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
+
+		bgColor := v.theme.Colors.CardBg
+		if clickable.Hovered() {
+			bgColor = v.theme.Colors.ButtonDanger
+		}
+
+		rr := gtx.Dp(unit.Dp(4))
+		rect := clip.RRect{
+			Rect: image.Rectangle{Max: size},
+			NE:   rr, NW: rr, SE: rr, SW: rr,
+		}
+		paint.FillShape(gtx.Ops, bgColor, rect.Op(gtx.Ops))
+
+		// Center the icon
+		iconSize := gtx.Dp(unit.Dp(16))
+		iconOffset := image.Point{
+			X: (size.X - iconSize) / 2,
+			Y: (size.Y - iconSize) / 2,
+		}
+		defer op.Offset(iconOffset).Push(gtx.Ops).Pop()
+
+		iconGtx := gtx
+		iconGtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+		iconGtx.Constraints.Max = iconGtx.Constraints.Min
+
+		iconColor := v.theme.Colors.TextMuted
+		if clickable.Hovered() {
+			iconColor = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+		}
+		icons.ContentClear.Layout(iconGtx, iconColor)
+
+		return layout.Dimensions{Size: size}
+	})
+}
+
+// collectBuildArgs gathers non-empty build arguments into a map.
+func (v *DebugView) collectBuildArgs() map[string]string {
+	result := make(map[string]string)
+	for _, row := range v.buildArgs {
+		key := row.keyEditor.Text()
+		value := row.valueEditor.Text()
+		if key != "" {
+			result[key] = value
+		}
+	}
+	return result
 }
 
 // layoutRunning shows the running debugger view

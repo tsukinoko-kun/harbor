@@ -39,6 +39,13 @@ type DebugParams struct {
 	// PS1 is the shell prompt to inject when the shell becomes ready.
 	// Should include a reset sequence to prevent color leaking between commands.
 	PS1 string
+	// EnableCaching enables Docker layer caching during the build.
+	// Warning: When enabled, cached layers are skipped, making those lines not debuggable.
+	EnableCaching bool
+	// BuildArgs is a map of build argument key-value pairs.
+	BuildArgs map[string]string
+	// PullImages forces pulling the latest base images before building.
+	PullImages bool
 }
 
 // LaunchConfig matches the buildx DAP launch configuration format.
@@ -160,9 +167,7 @@ var Client *DapClient
 // It starts an embedded Buildx DAP server, initializes the protocol,
 // and launches the build.
 func NewClient(params DebugParams) (*DapClient, error) {
-	log.Printf("Starting debugger with parameters:")
-	log.Printf("  Dockerfile: %s", params.Dockerfile)
-	log.Printf("  Context: %s", params.Context)
+	log.Printf("Starting debugger with parameters:\n%+v\n", params)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -970,9 +975,10 @@ func (c *DapClient) runBuildWithHandler() {
 		ContextPath:    c.Params.Context,
 		DockerfileName: c.Params.Dockerfile,
 		Builder:        builderName,
-		NoCache:        true,
-		Pull:           true,
-		ExportLoad:     true, // Load the image into docker
+		NoCache:        !c.Params.EnableCaching, // Inverted: caching enabled means NoCache=false
+		Pull:           c.Params.PullImages,
+		BuildArgs:      c.Params.BuildArgs,
+		ExportLoad:     false,
 	}
 
 	// Create a progress writer that logs to console

@@ -38,6 +38,7 @@ type Colors struct {
 	SidebarIconActive  color.NRGBA
 	SidebarSelectedBg  color.NRGBA
 	Breakpoint         color.NRGBA
+	Warning            color.NRGBA
 }
 
 // SyntaxColors defines colors for syntax highlighting.
@@ -95,15 +96,16 @@ func DefaultColors() Colors {
 		SidebarIconActive:  rgb(0x818cf8), // Indigo for selected icons
 		SidebarSelectedBg:  rgb(0x312e81), // Dark indigo background for selected
 		Breakpoint:         rgb(0xe06c75), // Red for breakpoint indicators
+		Warning:            rgb(0xfbbf24), // Yellow/amber for warnings
 	}
 }
 
 // Theme holds the application theme including colors and material theme.
 type Theme struct {
-	Material      *material.Theme
-	Colors        Colors
-	Syntax        SyntaxColors
-	MonoTypeface  font.Typeface // Monospace font for terminal output
+	Material     *material.Theme
+	Colors       Colors
+	Syntax       SyntaxColors
+	MonoTypeface font.Typeface // Monospace font for terminal output
 }
 
 // NewTheme creates a new application theme.
