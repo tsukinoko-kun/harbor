@@ -10,66 +10,102 @@ import (
 
 // Colors defines the color palette for the application.
 type Colors struct {
-	Background      color.NRGBA
-	Surface         color.NRGBA
-	SidebarBg       color.NRGBA
-	SidebarActive   color.NRGBA
-	SidebarHover    color.NRGBA
-	Text            color.NRGBA
-	TextSecondary   color.NRGBA
-	TextMuted       color.NRGBA
-	Border          color.NRGBA
-	StatusRunning   color.NRGBA
-	StatusStopped   color.NRGBA
-	StatusPaused    color.NRGBA
-	StatusCreated   color.NRGBA
-	Accent          color.NRGBA
-	Primary         color.NRGBA
-	GroupHeader     color.NRGBA
-	CardBg          color.NRGBA
-	SelectedBg      color.NRGBA
-	ButtonBg        color.NRGBA
-	ButtonHover     color.NRGBA
-	ButtonDanger    color.NRGBA
-	ButtonDangerHov color.NRGBA
-	ErrorBg         color.NRGBA
-	ErrorText       color.NRGBA
+	Background         color.NRGBA
+	Surface            color.NRGBA
+	SidebarBg          color.NRGBA
+	SidebarActive      color.NRGBA
+	SidebarHover       color.NRGBA
+	Text               color.NRGBA
+	TextSecondary      color.NRGBA
+	TextMuted          color.NRGBA
+	Border             color.NRGBA
+	StatusRunning      color.NRGBA
+	StatusStopped      color.NRGBA
+	StatusPaused       color.NRGBA
+	StatusCreated      color.NRGBA
+	Accent             color.NRGBA
+	Primary            color.NRGBA
+	GroupHeader        color.NRGBA
+	CardBg             color.NRGBA
+	SelectedBg         color.NRGBA
+	ButtonBg           color.NRGBA
+	ButtonHover        color.NRGBA
+	ButtonDanger       color.NRGBA
+	ButtonDangerHov    color.NRGBA
+	ErrorBg            color.NRGBA
+	ErrorText          color.NRGBA
+	SidebarIconDefault color.NRGBA
+	SidebarIconActive  color.NRGBA
+	SidebarSelectedBg  color.NRGBA
+	Breakpoint         color.NRGBA
+	Warning            color.NRGBA
+}
+
+// SyntaxColors defines colors for syntax highlighting.
+type SyntaxColors struct {
+	Keyword     color.NRGBA // FROM, RUN, COPY, etc.
+	String      color.NRGBA // quoted strings
+	Comment     color.NRGBA // # comments
+	Operator    color.NRGBA // : and @
+	Constant    color.NRGBA // ENV variables like $PATH
+	Punctuation color.NRGBA // special punctuation
+	Default     color.NRGBA // fallback/plain text
+}
+
+// DefaultSyntaxColors returns the default syntax highlighting colors (One Dark inspired).
+func DefaultSyntaxColors() SyntaxColors {
+	return SyntaxColors{
+		Keyword:     rgb(0x56b6c2), // Cyan for keywords
+		String:      rgb(0x98c379), // Green for strings
+		Comment:     rgb(0x5c6370), // Gray for comments
+		Operator:    rgb(0xc678dd), // Purple for operators
+		Constant:    rgb(0xd19a66), // Orange for constants
+		Punctuation: rgb(0xe06c75), // Red for special punctuation
+		Default:     rgb(0xabb2bf), // Light gray default
+	}
 }
 
 // DefaultColors returns the default dark color palette.
 func DefaultColors() Colors {
 	return Colors{
-		Background:      rgb(0x1a1a1a),
-		Surface:         rgb(0x242424),
-		SidebarBg:       rgb(0x1e1e1e),
-		SidebarActive:   rgb(0x2d2d2d),
-		SidebarHover:    rgb(0x333333),
-		Text:            rgb(0xffffff),
-		TextSecondary:   rgb(0xb0b0b0),
-		TextMuted:       rgb(0x707070),
-		Border:          rgb(0x3d3d3d),
-		StatusRunning:   rgb(0x4ade80), // Green
-		StatusStopped:   rgb(0xf87171), // Red
-		StatusPaused:    rgb(0xfbbf24), // Yellow
-		StatusCreated:   rgb(0x9ca3af), // Gray
-		Accent:          rgb(0x60a5fa), // Blue
-		Primary:         rgb(0x60a5fa), // Blue (same as accent)
-		GroupHeader:     rgb(0x2a2a2a),
-		CardBg:          rgb(0x2a2a2a),
-		SelectedBg:      rgb(0x1e3a5f), // Dark blue for selection
-		ButtonBg:        rgb(0x3d3d3d),
-		ButtonHover:     rgb(0x4d4d4d),
-		ButtonDanger:    rgb(0xdc2626), // Red
-		ButtonDangerHov: rgb(0xef4444), // Lighter red
-		ErrorBg:         rgb(0x7f1d1d), // Dark red background
-		ErrorText:       rgb(0xfecaca), // Light red text
+		Background:         rgb(0x1a1a1a),
+		Surface:            rgb(0x242424),
+		SidebarBg:          rgb(0x1e1e1e),
+		SidebarActive:      rgb(0x2d2d2d),
+		SidebarHover:       rgb(0x333333),
+		Text:               rgb(0xffffff),
+		TextSecondary:      rgb(0xb0b0b0),
+		TextMuted:          rgb(0x707070),
+		Border:             rgb(0x3d3d3d),
+		StatusRunning:      rgb(0x4ade80), // Green
+		StatusStopped:      rgb(0xf87171), // Red
+		StatusPaused:       rgb(0xfbbf24), // Yellow
+		StatusCreated:      rgb(0x9ca3af), // Gray
+		Accent:             rgb(0x818cf8), // Indigo
+		Primary:            rgb(0x818cf8), // Indigo (primary color)
+		GroupHeader:        rgb(0x2a2a2a),
+		CardBg:             rgb(0x2a2a2a),
+		SelectedBg:         rgb(0x312e81), // Dark indigo for selection
+		ButtonBg:           rgb(0x3d3d3d),
+		ButtonHover:        rgb(0x4d4d4d),
+		ButtonDanger:       rgb(0xdc2626), // Red
+		ButtonDangerHov:    rgb(0xef4444), // Lighter red
+		ErrorBg:            rgb(0x7f1d1d), // Dark red background
+		ErrorText:          rgb(0xfecaca), // Light red text
+		SidebarIconDefault: rgb(0x9ca3af), // Gray for non-selected icons
+		SidebarIconActive:  rgb(0x818cf8), // Indigo for selected icons
+		SidebarSelectedBg:  rgb(0x312e81), // Dark indigo background for selected
+		Breakpoint:         rgb(0xe06c75), // Red for breakpoint indicators
+		Warning:            rgb(0xfbbf24), // Yellow/amber for warnings
 	}
 }
 
 // Theme holds the application theme including colors and material theme.
 type Theme struct {
-	Material *material.Theme
-	Colors   Colors
+	Material     *material.Theme
+	Colors       Colors
+	Syntax       SyntaxColors
+	MonoTypeface font.Typeface // Monospace font for terminal output
 }
 
 // NewTheme creates a new application theme.
@@ -86,8 +122,10 @@ func NewTheme() *Theme {
 	th.ContrastFg = colors.Text
 
 	return &Theme{
-		Material: th,
-		Colors:   colors,
+		Material:     th,
+		Colors:       colors,
+		Syntax:       DefaultSyntaxColors(),
+		MonoTypeface: "monospace", // Generic monospace font family
 	}
 }
 

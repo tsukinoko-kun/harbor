@@ -1,15 +1,22 @@
 package ui
 
 import (
+	"context"
+	"fmt"
 	"image"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
 
+	"gio.tools/icons"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"gioui.org/widget/material"
-
+	"github.com/Masterminds/semver/v3"
 	"github.com/tsukinoko-kun/harbor/internal/models"
 )
 
@@ -24,22 +31,68 @@ type Sidebar struct {
 
 type sidebarItem struct {
 	view      models.View
-	label     string
+	icon      *widget.Icon
 	clickable widget.Clickable
+}
+
+func checkBuildxDAPSupport() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "buildx", "version")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	versionStr := string(out)
+	versionStrParts := strings.Split(versionStr, " ")
+	minVersion, err := semver.NewConstraint(">=0.29.0")
+	if err != nil {
+		panic(err)
+	}
+	for _, part := range versionStrParts {
+		if v, ok := strings.CutPrefix(part, "v"); ok {
+			sv, err := semver.NewVersion(v)
+			if err != nil {
+				continue
+			}
+			if minVersion.Check(sv) {
+				return true, nil
+			}
+		} else {
+			sv, err := semver.NewVersion(part)
+			if err != nil {
+				continue
+			}
+			if minVersion.Check(sv) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // NewSidebar creates a new sidebar.
 func NewSidebar(theme *Theme, onSelect func(models.View)) *Sidebar {
+	items := []sidebarItem{
+		{view: models.ViewContainers, icon: icons.ActionViewModule},
+		{view: models.ViewImages, icon: icons.ImageImage},
+		{view: models.ViewVolumes, icon: icons.DeviceStorage},
+		{view: models.ViewNetworks, icon: icons.ActionSettingsEthernet},
+	}
+	if ok, err := checkBuildxDAPSupport(); ok {
+		items = append(items, sidebarItem{view: models.ViewDebug, icon: icons.ActionBugReport})
+	} else {
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error checking buildx support: %v\n", err)
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: debugger is not available because buildx >= 0.29.0 is required\n")
+	}
 	return &Sidebar{
-		theme:    theme,
-		onSelect: onSelect,
-		items: []sidebarItem{
-			{view: models.ViewContainers, label: "Containers"},
-			{view: models.ViewImages, label: "Images"},
-			{view: models.ViewVolumes, label: "Volumes"},
-			{view: models.ViewNetworks, label: "Networks"},
-		},
-		settingsItem: sidebarItem{view: models.ViewSettings, label: "Settings"},
+		theme:        theme,
+		onSelect:     onSelect,
+		items:        items,
+		settingsItem: sidebarItem{view: models.ViewSettings, icon: icons.ActionSettings},
 		list: widget.List{
 			List: layout.List{Axis: layout.Vertical},
 		},
@@ -97,19 +150,28 @@ func (s *Sidebar) layoutItems(gtx layout.Context, currentView models.View) layou
 
 func (s *Sidebar) layoutItem(gtx layout.Context, item *sidebarItem, isActive, isHovered bool) layout.Dimensions {
 	return item.clickable.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if isHovered {
+			pointer.CursorPointer.Add(gtx.Ops)
+		}
 		return layout.Inset{
 			Top:    unit.Dp(2),
 			Bottom: unit.Dp(2),
 		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			// Background
+			// Background: selected = dark indigo (no hover change), hover = gray, default = sidebar bg
 			var bgColor = s.theme.Colors.SidebarBg
 			if isActive {
-				bgColor = s.theme.Colors.SidebarActive
+				bgColor = s.theme.Colors.SidebarSelectedBg
 			} else if isHovered {
 				bgColor = s.theme.Colors.SidebarHover
 			}
 
-			return layout.Stack{}.Layout(gtx,
+			// Icon color: indigo when selected, gray otherwise
+			iconColor := s.theme.Colors.SidebarIconDefault
+			if isActive {
+				iconColor = s.theme.Colors.SidebarIconActive
+			}
+
+			return layout.Stack{Alignment: layout.Center}.Layout(gtx,
 				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 					// Rounded rectangle background
 					rr := gtx.Dp(unit.Dp(6))
@@ -124,36 +186,14 @@ func (s *Sidebar) layoutItem(gtx layout.Context, item *sidebarItem, isActive, is
 					return layout.Inset{
 						Top:    unit.Dp(10),
 						Bottom: unit.Dp(10),
-						Left:   unit.Dp(12),
-						Right:  unit.Dp(12),
+						Left:   unit.Dp(10),
+						Right:  unit.Dp(10),
 					}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							// Active indicator
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if isActive {
-									size := gtx.Dp(unit.Dp(6))
-									circle := clip.Ellipse{
-										Min: image.Point{},
-										Max: image.Point{X: size, Y: size},
-									}
-									paint.FillShape(gtx.Ops, s.theme.Colors.Accent, circle.Op(gtx.Ops))
-									return layout.Dimensions{Size: image.Point{X: size, Y: size}}
-								}
-								return layout.Dimensions{Size: image.Point{X: gtx.Dp(unit.Dp(6)), Y: 0}}
-							}),
-							// Spacing
-							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-							// Label
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								label := material.Body1(s.theme.Material, item.label)
-								if isActive {
-									label.Color = s.theme.Colors.Text
-								} else {
-									label.Color = s.theme.Colors.TextSecondary
-								}
-								return label.Layout(gtx)
-							}),
-						)
+						// Render centered icon
+						iconSize := gtx.Dp(unit.Dp(24))
+						gtx.Constraints.Min = image.Point{X: iconSize, Y: iconSize}
+						gtx.Constraints.Max = gtx.Constraints.Min
+						return item.icon.Layout(gtx, iconColor)
 					})
 				}),
 			)

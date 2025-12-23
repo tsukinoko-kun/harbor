@@ -16,6 +16,7 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/tsukinoko-kun/harbor/internal/config"
+	"github.com/tsukinoko-kun/harbor/internal/dap"
 	"github.com/tsukinoko-kun/harbor/internal/docker"
 	"github.com/tsukinoko-kun/harbor/internal/models"
 	"github.com/tsukinoko-kun/harbor/internal/version"
@@ -35,6 +36,7 @@ type App struct {
 	images      *ImagesView
 	volumes     *VolumesView
 	networks    *NetworksView
+	debugUI     *DebugView
 	settingsUI  *SettingsView
 
 	// Data
@@ -63,6 +65,7 @@ func NewApp(dockerClient *docker.Client, settings *config.Settings) *App {
 	a.images = NewImagesView(theme)
 	a.volumes = NewVolumesView(theme)
 	a.networks = NewNetworksView(theme)
+	a.debugUI = NewDebugView(theme, settings)
 	a.settingsUI = NewSettingsView(theme, settings)
 
 	return a
@@ -101,10 +104,24 @@ func (a *App) refreshLoop() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		a.refreshData()
-		if a.window != nil {
-			a.window.Invalidate()
+	for {
+		// Get the current DAP update channel (may be nil if no client)
+		var dapUpdateChan <-chan struct{}
+		if dap.Client != nil {
+			dapUpdateChan = dap.Client.UpdateChan
+		}
+
+		select {
+		case <-ticker.C:
+			a.refreshData()
+			if a.window != nil {
+				a.window.Invalidate()
+			}
+		case <-dapUpdateChan:
+			// DAP client sent an update, invalidate the UI
+			if a.window != nil {
+				a.window.Invalidate()
+			}
 		}
 	}
 }
@@ -174,8 +191,8 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				// Sidebar
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Dp(unit.Dp(200))
-					gtx.Constraints.Max.X = gtx.Dp(unit.Dp(200))
+					gtx.Constraints.Min.X = gtx.Dp(unit.Dp(60))
+					gtx.Constraints.Max.X = gtx.Dp(unit.Dp(60))
 					return a.layoutSidebar(gtx)
 				}),
 				// Divider
@@ -225,6 +242,8 @@ func (a *App) layoutContent(gtx layout.Context) layout.Dimensions {
 		return a.volumes.Layout(gtx, a.volumeList)
 	case models.ViewNetworks:
 		return a.networks.Layout(gtx, a.networkList)
+	case models.ViewDebug:
+		return a.debugUI.Layout(gtx)
 	case models.ViewSettings:
 		return a.settingsUI.Layout(gtx)
 	default:

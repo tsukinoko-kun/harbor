@@ -11,6 +11,14 @@ import (
 // CopyToClipboardName is the name of the special "Copy to Clipboard" terminal option.
 const CopyToClipboardName = "Copy to Clipboard"
 
+// DefaultDebugPS1 is the default PS1 prompt for debug shell sessions.
+// It includes a reset sequence to prevent colors from leaking between commands.
+// Format: \[\033[0m\]\$
+//   - \[...\] marks non-printing chars for bash readline
+//   - \033[0m is the SGR reset sequence (clears colors/attributes)
+//   - \$ shows $ for normal user, # for root
+const DefaultDebugPS1 = `\[\033[0m\]\$ `
+
 // Terminal represents a detected terminal emulator.
 type Terminal struct {
 	Name string `json:"name"`
@@ -21,6 +29,9 @@ type Terminal struct {
 type Settings struct {
 	Terminals        []Terminal `json:"terminals"`
 	SelectedTerminal string     `json:"selected_terminal"`
+	// DebugPS1 is the PS1 prompt used in debug shell sessions.
+	// It should include a reset sequence to prevent color leaking.
+	DebugPS1 string `json:"debug_ps1"`
 }
 
 // configDir returns the path to the config directory.
@@ -53,7 +64,9 @@ func Load() (*Settings, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Create default settings
-			settings := &Settings{}
+			settings := &Settings{
+				DebugPS1: DefaultDebugPS1,
+			}
 			detectedTerminals := DetectTerminals()
 			// Always include the clipboard option
 			clipboardTerminal := Terminal{Name: CopyToClipboardName, Path: ""}
@@ -89,6 +102,11 @@ func Load() (*Settings, error) {
 	if !hasClipboard {
 		clipboardTerminal := Terminal{Name: CopyToClipboardName, Path: ""}
 		settings.Terminals = append([]Terminal{clipboardTerminal}, settings.Terminals...)
+	}
+
+	// Ensure DebugPS1 has a value (migration for existing configs)
+	if settings.DebugPS1 == "" {
+		settings.DebugPS1 = DefaultDebugPS1
 	}
 
 	return &settings, nil
