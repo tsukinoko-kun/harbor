@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/tsukinoko-kun/harbor/internal/config"
@@ -49,7 +50,8 @@ func (c *Client) GetContainerShell(ctx context.Context, containerID string) (str
 	}
 
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	cli := c.cli
+	c.mu.RUnlock()
 
 	for _, shell := range shells {
 		// Try to create an exec instance to test if the shell exists
@@ -68,19 +70,46 @@ func (c *Client) GetContainerShell(ctx context.Context, containerID string) (str
 			}
 		}
 
-		execID, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)
+		execID, err := cli.ContainerExecCreate(ctx, containerID, execConfig)
 		if err != nil {
+			// Shell likely doesn't exist
 			continue
 		}
 
-		// Start the exec to verify it works
-		err = c.cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
+		// Start the exec to verify the shell exists and works
+		// The error from ContainerExecStart will tell us if the shell binary is missing
+		err = cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{
+			Detach: false,
+		})
 		if err != nil {
+			// Shell doesn't exist or failed to start
 			continue
 		}
 
-		// Shell exists and works
-		return shell, nil
+		// Give the exec a moment to complete
+		time.Sleep(50 * time.Millisecond)
+
+		// Inspect the exec to check if it completed successfully
+		inspect, err := cli.ContainerExecInspect(ctx, execID.ID)
+		if err != nil {
+			// Couldn't inspect, try next shell
+			continue
+		}
+
+		// If still running, wait a bit more
+		if inspect.Running {
+			time.Sleep(100 * time.Millisecond)
+			inspect, err = cli.ContainerExecInspect(ctx, execID.ID)
+			if err != nil {
+				continue
+			}
+		}
+
+		// Only accept shell if it completed successfully (exit code 0)
+		if inspect.ExitCode == 0 && !inspect.Running {
+			// Shell exists and works
+			return shell, nil
+		}
 	}
 
 	// Default fallback
