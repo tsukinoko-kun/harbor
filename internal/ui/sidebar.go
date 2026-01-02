@@ -17,6 +17,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"github.com/Masterminds/semver/v3"
+	"github.com/tsukinoko-kun/harbor/internal/env"
 	"github.com/tsukinoko-kun/harbor/internal/models"
 )
 
@@ -38,10 +39,14 @@ type sidebarItem struct {
 func checkBuildxDAPSupport() (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "buildx", "version")
+
+	// Use env.GetDockerPath() to find docker even when launched from Finder on macOS
+	// where PATH may not include the docker binary location
+	dockerPath := env.GetDockerPath()
+	cmd := exec.CommandContext(ctx, dockerPath, "buildx", "version")
 	out, err := cmd.Output()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("docker at %q: %w", dockerPath, err)
 	}
 
 	versionStr := string(out)
