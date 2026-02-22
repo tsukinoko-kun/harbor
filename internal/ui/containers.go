@@ -177,8 +177,8 @@ func (v *ContainersView) Layout(gtx layout.Context, groups []docker.ContainerGro
 
 	var items []listItem
 	for _, group := range groups {
-		// Add group header (only for non-standalone groups)
-		if group.Name != "" {
+		// Add group header (only for compose project groups, not standalone containers)
+		if group.Name != "" && !group.Standalone {
 			items = append(items, listItem{isHeader: true, group: group})
 		}
 

@@ -24,6 +24,7 @@ type Container struct {
 // ContainerGroup represents a group of containers, either by project or standalone.
 type ContainerGroup struct {
 	Name       string
+	Standalone bool // true if this group represents a single standalone container
 	Containers []Container
 }
 
@@ -72,16 +73,40 @@ func (c *Client) ListContainersGrouped(ctx context.Context) ([]ContainerGroup, e
 		return nil, err
 	}
 
-	// Group by project
-	groups := make(map[string][]Container)
+	// Separate standalone containers from project containers
+	projectGroups := make(map[string][]Container)
+	var standalone []Container
 	for _, ctr := range containers {
-		groups[ctr.Project] = append(groups[ctr.Project], ctr)
+		if ctr.Project == "" {
+			standalone = append(standalone, ctr)
+		} else {
+			projectGroups[ctr.Project] = append(projectGroups[ctr.Project], ctr)
+		}
 	}
 
-	// Convert to slice and sort
-	result := make([]ContainerGroup, 0, len(groups))
-	for name, ctrs := range groups {
-		// Sort containers within group by name
+	// Build result: standalone containers first (each in their own group), then projects
+	result := make([]ContainerGroup, 0, len(standalone)+len(projectGroups))
+
+	// Sort standalone containers by name
+	sort.Slice(standalone, func(i, j int) bool {
+		return standalone[i].Name < standalone[j].Name
+	})
+	for _, ctr := range standalone {
+		result = append(result, ContainerGroup{
+			Name:       ctr.Name,
+			Standalone: true,
+			Containers: []Container{ctr},
+		})
+	}
+
+	// Add project groups sorted alphabetically
+	projectNames := make([]string, 0, len(projectGroups))
+	for name := range projectGroups {
+		projectNames = append(projectNames, name)
+	}
+	sort.Strings(projectNames)
+	for _, name := range projectNames {
+		ctrs := projectGroups[name]
 		sort.Slice(ctrs, func(i, j int) bool {
 			return ctrs[i].Name < ctrs[j].Name
 		})
@@ -90,17 +115,6 @@ func (c *Client) ListContainersGrouped(ctx context.Context) ([]ContainerGroup, e
 			Containers: ctrs,
 		})
 	}
-
-	// Sort groups: named projects first (alphabetically), then standalone (empty name)
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Name == "" {
-			return false
-		}
-		if result[j].Name == "" {
-			return true
-		}
-		return result[i].Name < result[j].Name
-	})
 
 	return result, nil
 }
